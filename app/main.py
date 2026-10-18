@@ -19,12 +19,21 @@ SERVER_NAME = "AntiMisOpen.SingleInstance.v1"
 
 
 def _set_app_user_model_id() -> None:
-    """让任务栏使用本程序图标，而不是 python.exe 的图标。"""
+    """让任务栏使用本程序图标，并让系统通知的应用名显示为 Anti MisOpen。"""
     try:
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            u"ChenyangLT.AntiMisOpen.1")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(u"AntiMisOpen")
+    except Exception:
+        return
+    try:
+        import winreg
+
+        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER,
+                               r"Software\Classes\AppUserModelId\AntiMisOpen")
+        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "Anti MisOpen")
+        winreg.SetValueEx(key, "ShowInSettings", 0, winreg.REG_DWORD, 1)
+        winreg.CloseKey(key)
     except Exception:
         pass
 
@@ -108,7 +117,7 @@ def main(argv=None) -> int:
 
     application = QApplication(argv)
     application.setApplicationName(config.APP_NAME)
-    application.setApplicationDisplayName("%s · %s" % (config.APP_NAME, config.APP_NAME_CN))
+    application.setApplicationDisplayName(config.APP_NAME)
     application.setApplicationVersion(config.APP_VERSION)
     application.setOrganizationName("ChenyangLT")
     application.setQuitOnLastWindowClosed(False)
@@ -119,6 +128,7 @@ def main(argv=None) -> int:
     sys.excepthook = _write_crash_log
 
     store = config.ConfigStore()
+    store.save()  # 首次运行时落盘默认配置，方便用户查看和备份
     themes.set_theme(str(store.get("theme") or "light_blue"))
     application.setStyleSheet(themes.qss())
 
@@ -141,8 +151,8 @@ def main(argv=None) -> int:
         window.hide()
         if window._tray.isVisible():
             window._tray.showMessage(
-                "%s 已在后台启动" % config.APP_NAME,
-                "开机自启动成功，重复双击会被自动拦截。",
+                config.APP_NAME,
+                "已在后台启动：开机自启动成功，重复双击会被自动拦截。",
                 QSystemTrayIcon.Information, 3000)
     else:
         window.show()

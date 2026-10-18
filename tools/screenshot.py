@@ -48,6 +48,13 @@ def seed(store: config.ConfigStore) -> None:
              "window_seconds": 3.0, "max_instances": 1, "action": None,
              "enabled": True, "note": ""},
         ],
+        "memory_auto": True,
+        "memory_threshold": 85,
+        "memory_deep": False,
+        "memory_auto_notify": True,
+        "memory_last_cleanup": now - 600,
+        "memory_last_freed": int(1.8 * 1024 ** 3),
+        "memory_total_freed": int(12.4 * 1024 ** 3),
         "stats": {
             "total_blocked": 128,
             "today": config.today_key(),
@@ -106,7 +113,7 @@ def main() -> int:
     for _ in range(8):
         application.processEvents()
 
-    names = ["dashboard", "rules", "exceptions", "settings", "about"]
+    names = ["dashboard", "cleaner", "rules", "exceptions", "settings", "about"]
     for index, name in enumerate(names):
         window.open_page(index)
         for _ in range(6):

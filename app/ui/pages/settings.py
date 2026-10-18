@@ -68,7 +68,7 @@ class SettingsPage(PageBase):
         self.body.addWidget(card)
 
     def _build_security(self) -> None:
-        card, layout = self.card("密码保护", "开启后，修改防护设置、关闭防护需要输入密码")
+        card, layout = self.card("密码保护", "开启后，关闭防护、暂停防护或退出程序需要输入密码")
         self._password_row = QWidget()
         row_layout = QHBoxLayout(self._password_row)
         row_layout.setContentsMargins(0, 0, 0, 0)
@@ -76,7 +76,7 @@ class SettingsPage(PageBase):
         titles = QVBoxLayout()
         titles.setSpacing(3)
         titles.addWidget(make_label("设置密码", "body"))
-        titles.addWidget(make_label("老师不知道密码，就无法关闭防护或改规则", "muted", wrap=True))
+        titles.addWidget(make_label("老师不知道密码，就无法关闭或暂停防护", "muted", wrap=True))
         row_layout.addLayout(titles, 1)
         self._password_badge = make_badge("未开启", "muted")
         row_layout.addWidget(self._password_badge, 0, Qt.AlignVCenter)

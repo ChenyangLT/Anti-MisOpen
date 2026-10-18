@@ -13,19 +13,23 @@ from PySide2.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel,
                                QListWidget, QListWidgetItem, QMenu, QStackedWidget,
                                QSystemTrayIcon, QVBoxLayout, QWidget)
 
-from ..core import autostart, config, themes, winutil
+import psutil
+
+from ..core import autostart, cleaner, config, themes, winutil
 from ..core.logbook import LogBook
 from ..core.monitor import MonitorEngine
 from . import icons
+from .clean_worker import CleanerThread
 from .dialogs import BaseDialog, PasswordDialog
 from .pages.about import AboutPage
+from .pages.cleaner import CleanerPage
 from .pages.dashboard import DashboardPage, human_duration
 from .pages.exceptions import ExceptionsPage
 from .pages.rules import RulesPage
 from .pages.settings import SettingsPage
 from .widgets import IconView, NavButton, Toast, WindowButton, make_badge, make_label
 
-PAGES = ("概览", "规则", "例外", "设置", "关于")
+PAGES = ("概览", "清理", "规则", "例外", "设置", "关于")
 
 
 class LogoMark(QWidget):
@@ -121,6 +125,7 @@ class MainWindow(QWidget):
         self._nav_buttons = []
         self._tray_tip_shown = False
         self._last_save = time.time()
+        self._clean_thread = None
 
         self.setObjectName("Root")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -190,8 +195,8 @@ class MainWindow(QWidget):
         section.setContentsMargins(10, 0, 0, 4)
         side.addWidget(section)
 
-        nav_items = (("grid", "概览"), ("sliders", "规则"), ("check", "例外"),
-                     ("gear", "设置"), ("info", "关于"))
+        nav_items = (("grid", "概览"), ("refresh", "清理"), ("sliders", "规则"),
+                     ("check", "例外"), ("gear", "设置"), ("info", "关于"))
         for index, (icon_name, text) in enumerate(nav_items):
             button = NavButton(icon_name, text)
             button.clicked.connect(lambda _checked=False, i=index: self.open_page(i))
@@ -242,8 +247,8 @@ class MainWindow(QWidget):
 
         self._stack = QStackedWidget()
         self._stack.setObjectName("PageStack")
-        self._pages = [DashboardPage(self), RulesPage(self), ExceptionsPage(self),
-                       SettingsPage(self), AboutPage(self)]
+        self._pages = [DashboardPage(self), CleanerPage(self), RulesPage(self),
+                       ExceptionsPage(self), SettingsPage(self), AboutPage(self)]
         for page in self._pages:
             self._stack.addWidget(page)
         content_layout.addWidget(self._stack, 1)
@@ -266,6 +271,9 @@ class MainWindow(QWidget):
         self._tray_pause.triggered.connect(lambda: self._tray_set_pause(900))
         self._tray_resume = menu.addAction("恢复防护")
         self._tray_resume.triggered.connect(lambda: self._tray_set_pause(0))
+        menu.addSeparator()
+        self._tray_clean = menu.addAction("一键清理内存")
+        self._tray_clean.triggered.connect(lambda: self.clean_memory_now("manual"))
         menu.addSeparator()
         self._tray_autostart = menu.addAction("开机自启动")
         self._tray_autostart.setCheckable(True)
@@ -361,7 +369,7 @@ class MainWindow(QWidget):
             if self.isVisible() and not self.isMinimized():
                 self.show_toast(message, "warning" if killed else "info")
             if self._tray.isVisible():
-                self._tray.showMessage("%s · 防误开" % config.APP_NAME,
+                self._tray.showMessage(config.APP_NAME,
                                        message + "\n重复双击已拦截，电脑保持流畅。",
                                        QSystemTrayIcon.Warning, 3500)
         self._sync_tray()
@@ -381,6 +389,12 @@ class MainWindow(QWidget):
         self._watch_timer.setInterval(20000)
         self._watch_timer.timeout.connect(self._on_watch)
         self._watch_timer.start()
+
+        # 自动清理：每 15 秒检查一次内存占用是否达到阈值
+        self._clean_timer = QTimer(self)
+        self._clean_timer.setInterval(15000)
+        self._clean_timer.timeout.connect(self._auto_clean_tick)
+        self._clean_timer.start()
 
     def _on_minute(self) -> None:
         if bool(self.store.get("enabled")) and not self.store.is_paused():
@@ -404,6 +418,61 @@ class MainWindow(QWidget):
             self.apply_config()
             self.refresh_pages()
         self._sync_tray()
+
+    # ------------------------------------------------------------- 内存清理
+    def clean_memory_now(self, source: str = "manual") -> None:
+        if self._clean_thread is not None and self._clean_thread.isRunning():
+            if source == "manual":
+                self.show_toast("正在清理中，请稍候…", "info")
+            return
+        deep = bool(self.store.get("memory_deep"))
+        if source == "manual":
+            self.show_toast("正在清理内存…", "info")
+        thread = CleanerThread(deep, self)
+        thread.finished_result.connect(lambda result: self._on_clean_done(result, source))
+        thread.finished.connect(thread.deleteLater)
+        self._clean_thread = thread
+        thread.start()
+
+    def _on_clean_done(self, result: dict, source: str) -> None:
+        self._clean_thread = None
+        if not result.get("ok"):
+            self.show_toast("清理失败：%s" % (result.get("error") or "未知错误"), "danger")
+            return
+        freed = int(result.get("freed") or 0)
+        total = int(self.store.get("memory_total_freed") or 0) + freed
+        self.store.update({
+            "memory_last_cleanup": time.time(),
+            "memory_last_freed": freed,
+            "memory_total_freed": total,
+        })
+        self.store.save()
+        if freed > 0:
+            summary = "已释放 %s 内存" % cleaner.format_bytes(freed)
+        else:
+            summary = "内存已经比较清爽"
+        if source == "auto":
+            if bool(self.store.get("memory_auto_notify")):
+                self.show_toast("自动清理完成：%s" % summary, "success")
+        else:
+            self.show_toast("%s · 清理了 %d 个进程" % (summary, int(result.get("trimmed") or 0)),
+                            "success")
+        self.refresh_pages()
+
+    def _auto_clean_tick(self) -> None:
+        if not bool(self.store.get("memory_auto")):
+            return
+        if self._clean_thread is not None and self._clean_thread.isRunning():
+            return
+        last = float(self.store.get("memory_last_cleanup") or 0)
+        if time.time() - last < 300:  # 两次自动清理至少间隔 5 分钟
+            return
+        try:
+            percent = psutil.virtual_memory().percent
+        except Exception:
+            return
+        if percent >= float(self.store.get("memory_threshold") or 85):
+            self.clean_memory_now("auto")
 
     # ------------------------------------------------------------- 对外接口
     def show_toast(self, text: str, tone: str = "success") -> None:
@@ -528,8 +597,8 @@ class MainWindow(QWidget):
             if not self._tray_tip_shown:
                 self._tray_tip_shown = True
                 self._tray.showMessage(
-                    "%s 仍在后台保护" % config.APP_NAME,
-                    "关闭窗口不会停止防护，可从托盘图标重新打开或退出。",
+                    config.APP_NAME,
+                    "仍在后台保护：关闭窗口不会停止防护，可从托盘图标重新打开或退出。",
                     QSystemTrayIcon.Information, 4000)
             return
         self.quit_app()
@@ -541,6 +610,11 @@ class MainWindow(QWidget):
                 return
         self._quitting = True
         self._save_geometry()
+        try:
+            if self._clean_thread is not None and self._clean_thread.isRunning():
+                self._clean_thread.wait(3000)
+        except Exception:
+            pass
         try:
             self.engine.stop()
         except Exception:

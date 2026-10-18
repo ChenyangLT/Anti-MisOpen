@@ -85,6 +85,15 @@ class DashboardPage(PageBase):
             "QPushButton:hover { background: rgba(255, 255, 255, 30); }")
         self._log_button.clicked.connect(self._on_open_logs)
         actions.addWidget(self._log_button)
+        self._clean_button = QPushButton("一键清理")
+        self._clean_button.setCursor(Qt.PointingHandCursor)
+        self._clean_button.setStyleSheet(
+            "QPushButton { color: #1F54D8; background: rgba(255, 255, 255, 232);"
+            " border: none; border-radius: 9px; padding: 7px 16px; font-size: 9.5pt;"
+            " font-weight: 600; }"
+            "QPushButton:hover { background: #FFFFFF; }")
+        self._clean_button.clicked.connect(lambda: self.win.clean_memory_now("manual"))
+        actions.addWidget(self._clean_button)
         actions.addStretch(1)
         left.addLayout(actions)
         layout.addLayout(left, 1)
@@ -116,7 +125,7 @@ class DashboardPage(PageBase):
         text = make_label("建议开启开机自启动，让防护在每次开机后自动生效（默认关闭）", "muted", wrap=True)
         layout.addWidget(text, 1)
         button = make_button("去开启", "ghost")
-        button.clicked.connect(lambda: self.win.open_page(3))
+        button.clicked.connect(lambda: self.win.open_page(4))
         layout.addWidget(button)
         self.body.addWidget(self._tip)
 
@@ -149,7 +158,7 @@ class DashboardPage(PageBase):
         tips = [
             ("shield", "防护默认覆盖全部程序，只对例外名单里的程序放行。"),
             ("clock", "判定时间窗默认 5 秒，连续在这个时间内重复启动才会被拦截。"),
-            ("key", "设置密码后，修改防护设置需要先输入密码。"),
+            ("key", "设置密码后，关闭防护、暂停防护或退出程序需要密码。"),
             ("info", "关闭窗口后会最小化到托盘，防护继续在后台运行。"),
         ]
         for icon_name, text in tips:
@@ -163,7 +172,7 @@ class DashboardPage(PageBase):
             tips_layout.addLayout(item)
         tips_layout.addStretch(1)
         settings_button = make_button("打开设置", "ghost")
-        settings_button.clicked.connect(lambda: self.win.open_page(3))
+        settings_button.clicked.connect(lambda: self.win.open_page(4))
         tips_layout.addWidget(settings_button, 0, Qt.AlignRight)
         row.addWidget(tips_card, 2)
 

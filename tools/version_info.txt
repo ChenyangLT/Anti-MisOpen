@@ -1,0 +1,29 @@
+# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        u'080404b0',
+        [StringStruct(u'CompanyName', u'ChenyangLT'),
+         StringStruct(u'FileDescription', u'Anti MisOpen \u9632\u8bef\u5f00\uff1a\u963b\u6b62\u91cd\u590d\u53cc\u51fb\u5bfc\u81f4\u7a0b\u5e8f\u591a\u5f00'),
+         StringStruct(u'FileVersion', u'1.0.0'),
+         StringStruct(u'InternalName', u'Anti-MisOpen'),
+         StringStruct(u'LegalCopyright', u'Copyright (C) 2026 ChenyangLT. MIT License.'),
+         StringStruct(u'OriginalFilename', u'Anti-MisOpen.exe'),
+         StringStruct(u'ProductName', u'Anti MisOpen'),
+         StringStruct(u'ProductVersion', u'1.0.0'),
+         StringStruct(u'Comments', u'Chen_yang_ & Deepseek V4.1 Flash 1017 Ver.')])
+    ]),
+    VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
+  ]
+)

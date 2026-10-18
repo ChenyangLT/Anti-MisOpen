@@ -21,7 +21,7 @@ class CleanerPage(PageBase):
         self._tick = 0
         self._build()
         self._timer = QTimer(self)
-        self._timer.setInterval(2500)
+        self._timer.setInterval(1000)
         self._timer.timeout.connect(self._on_tick)
         self._timer.start()
         self.refresh()

@@ -2,6 +2,8 @@
 """主窗口：侧边导航、页面栈、托盘与守护引擎的接线。"""
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes as wintypes
 import os
 import sys
 import time
@@ -148,6 +150,10 @@ class MainWindow(QWidget):
         self.open_page(0)
         self.apply_config()
         self.apply_theme(str(self.store.get("theme") or "light_blue"), refresh=False)
+        # 在窗口第一次显示前就把图标写入窗口与窗口类，避免任务栏按钮先按“无图标”
+        # 创建，之后即使 WM_SETICON 成功也不再刷新。
+        self.winId()
+        self._apply_taskbar_icon()
 
     # ------------------------------------------------------------- 界面
     def paintEvent(self, event):
@@ -392,7 +398,7 @@ class MainWindow(QWidget):
 
         # 自动清理：每 15 秒检查一次内存占用是否达到阈值
         self._clean_timer = QTimer(self)
-        self._clean_timer.setInterval(15000)
+        self._clean_timer.setInterval(5000)
         self._clean_timer.timeout.connect(self._auto_clean_tick)
         self._clean_timer.start()
 
@@ -574,9 +580,72 @@ class MainWindow(QWidget):
             pass
 
     # ------------------------------------------------------------- 事件
+    def _apply_taskbar_icon(self) -> None:
+        """无边框窗口是 WS_POPUP，任务栏图标可能空白；这里显式设置任务栏样式与图标。"""
+        if os.name != "nt":
+            return
+        try:
+            user32 = ctypes.windll.user32
+            hwnd = wintypes.HWND(int(self.winId()))
+            ws_ex_appwindow = 0x00040000
+            ws_ex_toolwindow = 0x00000080
+            gwlp_hicon = -14
+            gwlp_hiconsm = -34
+            long_ptr = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
+
+            get_long = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
+            set_long = getattr(user32, "SetWindowLongPtrW", None) or user32.SetWindowLongW
+            get_long.restype = long_ptr
+            get_long.argtypes = [wintypes.HWND, ctypes.c_int]
+            set_long.restype = long_ptr
+            set_long.argtypes = [wintypes.HWND, ctypes.c_int, long_ptr]
+
+            ex_style = get_long(hwnd, -20)
+            new_style = (ex_style | ws_ex_appwindow) & ~ws_ex_toolwindow
+            if new_style != ex_style:
+                set_long(hwnd, -20, new_style)
+
+            image_icon = 1
+            lr_loadfromfile = 0x00000010
+            icon_path = os.path.join(config.asset_dir(), "anti_misopen.ico")
+            big = small = 0
+            if os.path.isfile(icon_path):
+                user32.LoadImageW.restype = wintypes.HANDLE
+                user32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR,
+                                              wintypes.UINT, ctypes.c_int,
+                                              ctypes.c_int, wintypes.UINT]
+                big = user32.LoadImageW(None, icon_path, image_icon, 32, 32,
+                                        lr_loadfromfile)
+                small = user32.LoadImageW(None, icon_path, image_icon, 16, 16,
+                                          lr_loadfromfile)
+            if not big:
+                shell32 = ctypes.windll.shell32
+                shell32.ExtractIconW.restype = wintypes.HICON
+                big = shell32.ExtractIconW(None, sys.executable, 0)
+            if big or small:
+                user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT,
+                                                wintypes.WPARAM, wintypes.LPARAM]
+                user32.SendMessageW.restype = ctypes.c_longlong
+                if big:
+                    user32.SendMessageW(hwnd, 0x0080, 1, big)
+                    if hasattr(user32, "SetClassLongPtrW"):
+                        user32.SetClassLongPtrW.restype = long_ptr
+                        user32.SetClassLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, long_ptr]
+                        user32.SetClassLongPtrW(hwnd, gwlp_hicon, big)
+                if small:
+                    user32.SendMessageW(hwnd, 0x0080, 0, small)
+                    if hasattr(user32, "SetClassLongPtrW"):
+                        user32.SetClassLongPtrW(hwnd, gwlp_hiconsm, small)
+            # 让任务栏立即重绘图标
+            user32.SetWindowPos.restype = wintypes.BOOL
+            user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0013)
+        except Exception:
+            pass
+
     def showEvent(self, event):
         super().showEvent(event)
         self._toast.reposition()
+        QTimer.singleShot(0, self._apply_taskbar_icon)
         if bool(self.store.get("first_run")):
             self.store.set("first_run", False)
             self.store.save()
@@ -613,6 +682,12 @@ class MainWindow(QWidget):
         try:
             if self._clean_thread is not None and self._clean_thread.isRunning():
                 self._clean_thread.wait(3000)
+        except Exception:
+            pass
+        try:
+            for page in self._pages:
+                if hasattr(page, "wait_hardware"):
+                    page.wait_hardware(3000)
         except Exception:
             pass
         try:

@@ -41,7 +41,7 @@ SYSTEM_NAMES = {
 
 INSTALLER_HINTS = ("setup", "install", "unins", "update", "msiexec", "patch")
 
-POLL_INTERVAL = 0.4
+POLL_INTERVAL = 0.2
 SELF_NAME = os.path.basename(os.path.abspath(__import__("sys").executable)).lower()
 
 

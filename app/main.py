@@ -18,21 +18,51 @@ from app.ui.main_window import MainWindow, app_icon
 SERVER_NAME = "AntiMisOpen.SingleInstance.v1"
 
 
+def _stable_icon_path() -> str:
+    """把图标复制到配置目录，得到不随单文件解包临时目录消失的稳定路径。
+
+    Windows 的任务栏 / 通知中心会按 AUMID 的 IconUri 缓存图标；如果 IconUri
+    指向 PyInstaller 解包出来的 _MEIxxxx 临时目录，程序退出后路径失效，任务栏
+    就只能显示一个通用的空白图标。
+    """
+    source = os.path.join(config.asset_dir(), "anti_misopen.ico")
+    if not os.path.isfile(source):
+        return sys.executable
+    try:
+        target = os.path.join(config.app_data_dir(), "app_icon.ico")
+        folder = os.path.dirname(target)
+        if folder and not os.path.isdir(folder):
+            os.makedirs(folder)
+        need_copy = True
+        if os.path.isfile(target):
+            need_copy = os.path.getsize(target) != os.path.getsize(source)
+        if need_copy:
+            import shutil
+            shutil.copyfile(source, target)
+        return target
+    except Exception:
+        return source
+
+
 def _set_app_user_model_id() -> None:
     """让任务栏使用本程序图标，并让系统通知的应用名显示为 Anti MisOpen。"""
     try:
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(u"AntiMisOpen")
+        aumid = os.environ.get("ANTIMISOPEN_AUMID", "AntiMisOpen")
+        if not aumid or aumid.lower() == "none":
+            return
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(aumid)
     except Exception:
         return
     try:
         import winreg
 
         key = winreg.CreateKey(winreg.HKEY_CURRENT_USER,
-                               r"Software\Classes\AppUserModelId\AntiMisOpen")
+                               "Software\\Classes\\AppUserModelId\\" + aumid)
         winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "Anti MisOpen")
         winreg.SetValueEx(key, "ShowInSettings", 0, winreg.REG_DWORD, 1)
+        winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, _stable_icon_path())
         winreg.CloseKey(key)
     except Exception:
         pass

@@ -16,7 +16,7 @@ import time
 APP_ID = "AntiMisOpen"
 APP_NAME = "Anti MisOpen"
 APP_NAME_CN = "防误开"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 BUILD_DATE = "2026-10-18"
 APP_SIGNATURE = "Chen_yang_ & Deepseek V4.1 Flash 1017 Ver."
 GITHUB_URL = "https://github.com/ChenyangLT/Anti-MisOpen"

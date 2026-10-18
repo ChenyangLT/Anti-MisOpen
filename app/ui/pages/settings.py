@@ -49,7 +49,7 @@ class SettingsPage(PageBase):
         row = QHBoxLayout()
         row.setSpacing(8)
         row.addWidget(make_badge("常驻后台", "success"))
-        row.addWidget(make_label("守护引擎以约 0.4 秒的间隔检查新启动的程序，占用很低。", "muted"))
+        row.addWidget(make_label("守护引擎以约 0.2 秒的间隔检查新启动的程序，占用很低。", "muted"))
         row.addStretch(1)
         layout.addLayout(row)
         self.body.addWidget(card)

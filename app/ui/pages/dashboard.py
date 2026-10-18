@@ -2,15 +2,17 @@
 """概览页：防护状态、今日数据、最近拦截。"""
 from __future__ import annotations
 
+import os
 import time
 
-from PySide2.QtCore import Qt
+import psutil
+from PySide2.QtCore import Qt, QTimer
 from PySide2.QtWidgets import (QFrame, QHBoxLayout, QPushButton, QSizePolicy,
                                QVBoxLayout, QWidget)
 
 from ...core import config, themes, winutil
-from ..widgets import (CardRow, EmptyState, IconView, StatCard, StatusPill,
-                       ToggleSwitch, make_badge, make_label)
+from ..widgets import (CardRow, EmptyState, IconView, RingGauge, StatCard,
+                       StatusPill, ToggleSwitch, make_badge, make_label)
 from .base import PageBase, clear_layout, make_button
 
 
@@ -31,6 +33,9 @@ def human_duration(seconds: float) -> str:
 class DashboardPage(PageBase):
     def __init__(self, window):
         super().__init__(window)
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(1000)
+        self._live_timer.timeout.connect(self._refresh_live)
         self._build()
 
     # ------------------------------------------------------------- 构建
@@ -39,6 +44,7 @@ class DashboardPage(PageBase):
         self.page_header("概览", "阻止重复双击造成的程序多开，让电脑一直保持流畅",
                          badge=self._pill)
         self._build_hero()
+        self._build_health()
         self._build_autostart_tip()
         self._build_stats()
         self._build_bottom()
@@ -113,6 +119,77 @@ class DashboardPage(PageBase):
 
         self.body.addWidget(hero)
         self._hero = hero
+
+    def _build_health(self) -> None:
+        clear_button = make_button("打开清理", "ghost")
+        clear_button.clicked.connect(lambda: self.win.open_page(1))
+        card, layout = self.card(
+            "系统状态", "内存、CPU 与磁盘占用按比例显示，每秒刷新一次", right=clear_button)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        specs = (
+            ("cpu", "CPU 占用", "accent"),
+            ("mem", "内存占用", "success"),
+            ("disk", "磁盘占用", "warning"),
+        )
+        self._gauges = {}
+        for key, label, color in specs:
+            col = QVBoxLayout()
+            col.setSpacing(6)
+            col.setAlignment(Qt.AlignHCenter)
+            gauge = RingGauge(label, color, 104)
+            col.addWidget(gauge, 0, Qt.AlignHCenter)
+            hint = make_label("正在读取…", "faint")
+            hint.setAlignment(Qt.AlignCenter)
+            col.addWidget(hint)
+            row.addLayout(col, 1)
+            self._gauges[key] = (gauge, hint)
+        layout.addLayout(row)
+        self.body.addWidget(card)
+        self._prime_live()
+
+    def _prime_live(self) -> None:
+        try:
+            psutil.cpu_percent(interval=None)
+        except Exception:
+            pass
+
+    def _refresh_live(self) -> None:
+        if not hasattr(self, "_gauges"):
+            return
+        try:
+            cpu = psutil.cpu_percent(interval=None)
+            physical = psutil.cpu_count(logical=False) or 0
+            logical = psutil.cpu_count(logical=True) or 0
+            cpu_gauge, cpu_hint = self._gauges["cpu"]
+            cpu_gauge.set_value(cpu)
+            cpu_hint.setText("%d 核 %d 线程" % (physical, logical) if physical
+                             else "%d 线程" % logical)
+
+            memory = psutil.virtual_memory()
+            mem_gauge, mem_hint = self._gauges["mem"]
+            mem_gauge.set_value(memory.percent)
+            mem_hint.setText("已用 %.1f / %.1f GB" % (
+                (memory.total - memory.available) / float(1024 ** 3),
+                memory.total / float(1024 ** 3)))
+
+            drive = os.environ.get("SystemDrive", "C:") + "\\"
+            usage = psutil.disk_usage(drive)
+            disk_gauge, disk_hint = self._gauges["disk"]
+            disk_gauge.set_value(usage.percent)
+            disk_hint.setText("剩余 %.0f GB / %.0f GB" % (
+                usage.free / float(1024 ** 3), usage.total / float(1024 ** 3)))
+        except Exception:
+            pass
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._live_timer.start()
+        QTimer.singleShot(120, self._refresh_live)
+
+    def hideEvent(self, event):
+        self._live_timer.stop()
+        super().hideEvent(event)
 
     def _build_autostart_tip(self) -> None:
         self._tip = QFrame()
@@ -218,6 +295,7 @@ class DashboardPage(PageBase):
             self._pause_button.setText("暂停防护")
 
         self._tip.setVisible(not bool(self.store.get("autostart")))
+        self._refresh_live()
         self._refresh_recent()
 
     def _refresh_recent(self) -> None:

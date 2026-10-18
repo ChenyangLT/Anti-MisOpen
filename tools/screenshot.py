@@ -21,7 +21,7 @@ sandbox = tempfile.mkdtemp(prefix="antimisopen-shot-")
 os.environ["APPDATA"] = sandbox
 os.environ["QT_QPA_PLATFORM"] = "windows"  # offscreen 平台不渲染文字，必须用真实平台
 
-from PySide2.QtCore import Qt  # noqa: E402
+from PySide2.QtCore import QEvent, Qt  # noqa: E402
 from PySide2.QtGui import QFont  # noqa: E402
 from PySide2.QtWidgets import QApplication  # noqa: E402
 
@@ -33,6 +33,7 @@ from app.ui.main_window import MainWindow  # noqa: E402
 def seed(store: config.ConfigStore) -> None:
     now = time.time()
     store.update({
+        "first_run": False,
         "action": "notify_only",
         "autostart": True,
         "exceptions": [
@@ -118,9 +119,30 @@ def main() -> int:
         window.open_page(index)
         for _ in range(6):
             application.processEvents()
+        if name == "about":
+            # 硬件信息在后台线程读取，等它完成再截图
+            page = window._pages[index]
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                application.processEvents()
+                thread = getattr(page, "_hw_thread", None)
+                if thread is None or not thread.isRunning():
+                    break
+                time.sleep(0.1)
+            application.processEvents()
+        if name == "dashboard":
+            # 让环形指标至少完成一次 1 秒采样，CPU 百分比才有意义
+            deadline = time.time() + 1.6
+            while time.time() < deadline:
+                application.processEvents()
+                time.sleep(0.05)
         time.sleep(0.15)
         for _ in range(4):
             application.processEvents()
+        # 真实 Windows 平台会把鼠标下方的导航按钮置为 hover，截图前清掉
+        for button in getattr(window, "_nav_buttons", []):
+            application.sendEvent(button, QEvent(QEvent.Leave))
+        application.processEvents()
         path = os.path.join(SHOT_DIR, "%s.png" % name)
         window.grab().save(path)
         print("saved", path)

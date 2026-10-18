@@ -2,16 +2,19 @@
 """关于页：版本、署名、原理说明和项目链接。"""
 from __future__ import annotations
 
+import os
 import platform
+import time
 
 from PySide2.QtCore import Qt, QUrl
 from PySide2.QtGui import QDesktopServices, QPainter, QPixmap
 from PySide2.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
-from ...core import config, themes, winutil
+from ...core import config, hardware, themes, winutil
+from ..hardware_worker import HardwareThread
 from ..icons import icon_pixmap
 from ..widgets import IconView, make_badge, make_label
-from .base import PageBase, make_button
+from .base import PageBase, clear_layout, make_button
 
 
 class LogoView(QWidget):
@@ -39,14 +42,94 @@ class LogoView(QWidget):
 class AboutPage(PageBase):
     def __init__(self, window):
         super().__init__(window)
+        self._hw_thread = None
+        self._hw_started = False
         self._build()
 
     def _build(self) -> None:
-        self.page_header("关于", "版本信息、工作原理和项目地址")
+        self.page_header("关于", "版本信息、硬件信息、工作原理和项目地址")
         self._build_hero()
         self._build_how()
+        self._build_hardware()
         self._build_info()
         self.body.addStretch(1)
+
+    # ------------------------------------------------------------ 硬件信息
+    def _build_hardware(self) -> None:
+        self._hw_refresh = make_button("重新读取", "ghost")
+        self._hw_refresh.clicked.connect(lambda: self.refresh_hardware(force=True))
+        card, layout = self.card(
+            "硬件信息",
+            "自动读取处理器、主板、内存、显卡、硬盘与网络等设备信息（只读，不会修改系统设置）",
+            right=self._hw_refresh)
+        self._hw_status = make_label("正在读取硬件信息…", "muted", wrap=True)
+        layout.addWidget(self._hw_status)
+        self._hw_host = QWidget()
+        self._hw_layout = QVBoxLayout(self._hw_host)
+        self._hw_layout.setContentsMargins(0, 0, 0, 0)
+        self._hw_layout.setSpacing(8)
+        layout.addWidget(self._hw_host)
+        self.body.addWidget(card)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._hw_started:
+            return
+        self._hw_started = True
+        cached = hardware.load_cache()
+        if cached and cached.get("groups"):
+            self._render_hardware(cached, cached=True)
+        self.refresh_hardware()
+
+    def refresh_hardware(self, force: bool = False) -> None:
+        try:
+            if self._hw_thread is not None and self._hw_thread.isRunning():
+                return
+        except RuntimeError:
+            self._hw_thread = None
+        if force or not self._hw_host.layout().count():
+            self._hw_status.setText("正在重新读取硬件信息，首次可能需要几秒钟…")
+        self._hw_refresh.setEnabled(False)
+        self._hw_thread = HardwareThread(self)
+        self._hw_thread.finished_data.connect(self._render_hardware)
+        self._hw_thread.finished.connect(lambda: self._hw_refresh.setEnabled(True))
+        self._hw_thread.start()
+
+    def _render_hardware(self, data: dict, cached: bool = False) -> None:
+        groups = data.get("groups") or []
+        if not groups:
+            self._hw_status.setText(
+                "暂时没有读到硬件信息，可能是系统 WMI 服务不可用。"
+                "可以点击右上角「重新读取」再试一次。")
+            return
+        clear_layout(self._hw_layout)
+        for index, group in enumerate(groups):
+            title = make_label(str(group.get("title") or "硬件"), "h3")
+            self._hw_layout.addWidget(title)
+            for name, value in group.get("rows") or []:
+                row = QHBoxLayout()
+                row.setSpacing(12)
+                label = make_label(str(name), "muted")
+                label.setFixedWidth(104)
+                row.addWidget(label, 0, Qt.AlignTop)
+                row.addWidget(make_label(str(value), "faint", wrap=True), 1)
+                self._hw_layout.addLayout(row)
+            if index != len(groups) - 1:
+                self._hw_layout.addWidget(self.divider())
+        stamp = data.get("generated_at") or 0
+        text = "已读取 %d 项设备信息" % len(groups)
+        if stamp:
+            text += " · 更新于 " + time.strftime("%H:%M:%S", time.localtime(stamp))
+        if cached:
+            text += " · 缓存"
+        self._hw_status.setText(text)
+
+    def wait_hardware(self, timeout: int = 4000) -> None:
+        try:
+            if self._hw_thread is not None and self._hw_thread.isRunning():
+                self._hw_thread.wait(timeout)
+        except Exception:
+            pass
 
     def _build_hero(self) -> None:
         card = QFrame()
@@ -80,7 +163,7 @@ class AboutPage(PageBase):
     def _build_how(self) -> None:
         card, layout = self.card("它是怎么工作的")
         steps = [
-            ("clock", "后台每 0.4 秒检查一次新出现的程序进程"),
+            ("clock", "后台每 0.2 秒检查一次新出现的程序进程"),
             ("app", "当同一个程序在判定时间窗内被再次启动、且实例数超过上限时触发拦截"),
             ("ban", "按设置结束多余的进程，或只给出提醒"),
             ("shield", "例外名单、自定义规则和密码保护让设置更灵活"),

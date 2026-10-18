@@ -660,3 +660,62 @@ class StatCard(QFrame):
         self._value.setText(str(value))
         if hint is not None:
             self._hint.setText(hint)
+
+
+class RingGauge(QWidget):
+    """按比例绘制的圆环指标：中间是百分比，下方是名称。"""
+
+    def __init__(self, label: str, color_key: str = "accent", size: int = 108,
+                 parent=None):
+        super().__init__(parent)
+        self._label = str(label)
+        self._color_key = color_key
+        self._value = 0.0
+        self._size = size
+        self.setFixedSize(size, size)
+
+    def set_value(self, percent: float) -> None:
+        try:
+            value = max(0.0, min(100.0, float(percent)))
+        except (TypeError, ValueError):
+            return
+        if abs(value - self._value) > 0.05:
+            self._value = value
+            self.update()
+
+    def value(self) -> float:
+        return self._value
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        palette = themes.current()
+        side = float(min(self.width(), self.height()))
+        margin = max(7.0, side * 0.08)
+        rect = QRectF(margin, margin, side - margin * 2, side - margin * 2)
+        width = max(6.0, side * 0.075)
+        track = QPen(with_alpha(palette["border"], 210), width, Qt.SolidLine, Qt.RoundCap)
+        painter.setPen(track)
+        painter.drawEllipse(rect)
+        color = to_color(palette.get(self._color_key, palette["accent"]))
+        if self._value > 0.4:
+            pen = QPen(color, width, Qt.SolidLine, Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawArc(rect, 90 * 16, int(round(-self._value / 100.0 * 360 * 16)))
+        font = QFont(painter.font())
+        font.setPointSizeF(max(9.0, side * 0.135))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(color)
+        painter.drawText(rect.adjusted(0, -int(side * 0.06), 0, -int(side * 0.06)),
+                         Qt.AlignCenter, "%d%%" % int(round(self._value)))
+        font2 = QFont(painter.font())
+        font2.setPointSizeF(max(7.5, side * 0.075))
+        font2.setBold(False)
+        painter.setFont(font2)
+        painter.setPen(to_color(palette["muted"]))
+        label_rect = QRectF(rect.left(), rect.center().y() + side * 0.10,
+                            rect.width(), side * 0.20)
+        painter.drawText(label_rect, Qt.AlignHCenter | Qt.AlignTop, self._label)
+        painter.end()
+

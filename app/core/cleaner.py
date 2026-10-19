@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""内存清理：参考 PCL2 / Mem Reduct 的做法，只清理工作集与系统缓存，绝不结束任何软件。
+"""内存释放：只清理工作集与系统缓存，绝不结束任何软件。
 
 - 标准清理（无需管理员）：对当前用户有权限访问的进程调用 EmptyWorkingSet 与
   SetProcessWorkingSetSize，让不活跃的内存页交还给系统。

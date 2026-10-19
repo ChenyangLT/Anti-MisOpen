@@ -154,7 +154,7 @@ class AboutPage(PageBase):
         row.addWidget(self._avatar_refresh, 0, Qt.AlignTop)
         col.addLayout(row)
 
-        model = make_label(profile.MODEL, "body")
+        model = make_label(profile.MODEL + " 制作", "body")
         model.setStyleSheet("font-weight: 600; color: %s;" % themes.current()["accent"])
         col.addWidget(model)
         col.addWidget(make_label(

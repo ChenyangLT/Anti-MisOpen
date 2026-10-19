@@ -34,7 +34,7 @@ from .pages.settings import SettingsPage
 from .widgets import (AvatarView, IconView, NavButton, Toast, WindowButton,
                       make_badge, make_label)
 
-PAGES = ("概览", "清理", "垃圾清理", "规则", "例外", "设置", "关于")
+PAGES = ("概览", "释放内存", "垃圾清理", "规则", "例外", "设置", "关于")
 
 
 class AvatarThread(QThread):
@@ -232,7 +232,7 @@ class MainWindow(QWidget):
         section.setContentsMargins(10, 0, 0, 4)
         side.addWidget(section)
 
-        nav_items = (("grid", "概览"), ("refresh", "清理"), ("trash", "垃圾清理"),
+        nav_items = (("grid", "概览"), ("refresh", "释放内存"), ("trash", "垃圾清理"),
                      ("sliders", "规则"), ("check", "例外"), ("gear", "设置"),
                      ("info", "关于"))
         for index, (icon_name, text) in enumerate(nav_items):
@@ -258,14 +258,14 @@ class MainWindow(QWidget):
         profile_row.setSpacing(9)
         self._side_avatar = AvatarView(30, "CY")
         profile_row.addWidget(self._side_avatar, 0, Qt.AlignVCenter)
-        profile_text = QVBoxLayout()
-        profile_text.setSpacing(1)
         self._side_login = make_label(profile.LOGIN, "sideName")
-        self._side_model = make_label(profile.MODEL, "sideModel")
-        profile_text.addWidget(self._side_login)
-        profile_text.addWidget(self._side_model)
-        profile_row.addLayout(profile_text, 1)
+        profile_row.addWidget(self._side_login, 1, Qt.AlignVCenter)
         side.addLayout(profile_row)
+
+        # 制作署名放在头像下方、单独一行，避免被当成作者信息的一部分
+        self._side_made = make_label(profile.MODEL + " 制作", "sideModel")
+        self._side_made.setContentsMargins(10, 3, 4, 0)
+        side.addWidget(self._side_made)
 
         wordmark = make_label("v%s  ·  %s" % (config.APP_VERSION, config.APP_NAME_CN), "wordmark")
         wordmark.setContentsMargins(10, 2, 4, 0)
@@ -392,7 +392,7 @@ class MainWindow(QWidget):
         self._tray_resume = menu.addAction("恢复防护")
         self._tray_resume.triggered.connect(lambda: self._tray_set_pause(0))
         menu.addSeparator()
-        self._tray_clean = menu.addAction("一键清理内存")
+        self._tray_clean = menu.addAction("释放内存")
         self._tray_clean.triggered.connect(lambda: self.clean_memory_now("manual"))
         menu.addSeparator()
         self._tray_autostart = menu.addAction("开机自启动")
@@ -541,11 +541,11 @@ class MainWindow(QWidget):
     def clean_memory_now(self, source: str = "manual") -> None:
         if self._clean_thread is not None and self._clean_thread.isRunning():
             if source == "manual":
-                self.show_toast("正在清理中，请稍候…", "info")
+                self.show_toast("正在释放内存，请稍候…", "info")
             return
         deep = bool(self.store.get("memory_deep"))
         if source == "manual":
-            self.show_toast("正在清理内存…", "info")
+            self.show_toast("正在释放内存…", "info")
         thread = CleanerThread(deep, self)
         thread.finished_result.connect(lambda result: self._on_clean_done(result, source))
         thread.finished.connect(thread.deleteLater)
@@ -555,7 +555,7 @@ class MainWindow(QWidget):
     def _on_clean_done(self, result: dict, source: str) -> None:
         self._clean_thread = None
         if not result.get("ok"):
-            self.show_toast("清理失败：%s" % (result.get("error") or "未知错误"), "danger")
+            self.show_toast("释放失败：%s" % (result.get("error") or "未知错误"), "danger")
             return
         freed = int(result.get("freed") or 0)
         total = int(self.store.get("memory_total_freed") or 0) + freed
@@ -570,12 +570,12 @@ class MainWindow(QWidget):
         else:
             summary = "内存已经比较清爽"
         self.push_notification("notify_memory", "内存释放",
-                               summary + (" · 自动清理" if source == "auto" else ""))
+                               summary + (" · 自动释放" if source == "auto" else ""))
         if source == "auto":
             if bool(self.store.get("notify_memory")):
-                self.show_toast("自动清理完成：%s" % summary, "success")
+                self.show_toast("自动释放完成：%s" % summary, "success")
         else:
-            self.show_toast("%s · 清理了 %d 个进程" % (summary, int(result.get("trimmed") or 0)),
+            self.show_toast("%s · 释放了 %d 个进程" % (summary, int(result.get("trimmed") or 0)),
                             "success")
         self.refresh_pages()
 

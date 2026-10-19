@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""清理页：一键释放内存、阈值自动清理、查看内存占用最高的程序。"""
+"""释放内存页：一键释放内存、阈值自动释放、查看内存占用最高的程序。"""
 from __future__ import annotations
 
 import time
@@ -28,19 +28,17 @@ class CleanerPage(PageBase):
 
     # ------------------------------------------------------------- 构建
     def _build(self) -> None:
-        self._clean_button = make_button("一键清理", "primary")
+        self._clean_button = make_button("立即释放内存", "primary")
         self._clean_button.clicked.connect(lambda: self.win.clean_memory_now("manual"))
         self.page_header(
-            "清理与性能",
-            "参考 PCL2 与 Mem Reduct 的清理思路：只释放内存，不会关闭任何软件",
+            "释放内存",
+            "只把不活跃进程占用的内存交还系统，不会关闭任何软件",
             actions=[self._clean_button])
 
         self._build_stats()
         self._build_status()
         self._build_auto()
         self._build_top()
-        self.hint("清理会暂时让不活跃的进程把内存交还系统；正在使用的程序会按需重新载入，不会丢数据，"
-                  "也不会被关闭。深度清理可以额外释放系统缓存，但需要以管理员身份运行。")
         self.body.addStretch(1)
 
     def _build_stats(self) -> None:
@@ -48,7 +46,7 @@ class CleanerPage(PageBase):
         row.setSpacing(14)
         self._mem_card = StatCard("grid", "内存占用", "0%", "已用 0 / 0")
         self._cpu_card = StatCard("clock", "CPU 占用", "0%", "全系统平均")
-        self._free_card = StatCard("refresh", "累计释放", "0 MB", "自使用清理功能以来")
+        self._free_card = StatCard("refresh", "累计释放", "0 MB", "自使用释放内存以来")
         for card in (self._mem_card, self._cpu_card, self._free_card):
             card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             row.addWidget(card)
@@ -77,10 +75,10 @@ class CleanerPage(PageBase):
         right = QVBoxLayout()
         right.setSpacing(6)
         right.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self._last_label = make_label("还没有清理过", "muted")
+        self._last_label = make_label("还没有释放过", "muted")
         self._last_label.setAlignment(Qt.AlignRight)
         right.addWidget(self._last_label)
-        self._clean_hint = make_label("标准清理 · 约 1 秒", "faint")
+        self._clean_hint = make_label("标准释放 · 约 1 秒", "faint")
         self._clean_hint.setAlignment(Qt.AlignRight)
         right.addWidget(self._clean_hint)
         row.addLayout(right, 0)
@@ -88,35 +86,35 @@ class CleanerPage(PageBase):
         self.body.addWidget(card)
 
     def _build_auto(self) -> None:
-        card, layout = self.card("自动清理", "内存占用达到阈值时自动清理，和 Mem Reduct 的阈值触发一样")
+        card, layout = self.card("自动释放", "内存占用达到阈值时自动释放，不做多余的打扰")
         self._auto_switch = ToggleSwitch()
         self._auto_switch.toggled.connect(self._on_auto)
         layout.addWidget(self.setting_row(
-            "启用自动清理", "关闭时只在你点击“一键清理”时释放内存", self._auto_switch))
+            "启用自动释放", "关闭时只在点击“立即释放内存”时释放内存", self._auto_switch))
         layout.addWidget(self.divider())
 
         self._threshold = Stepper(85.0, 50.0, 95.0, 5.0, 0, " %")
         self._threshold.valueChanged.connect(self._on_threshold)
         layout.addWidget(self.setting_row(
-            "内存占用阈值", "达到这个百分比后触发一次自动清理", self._threshold))
+            "内存占用阈值", "达到这个百分比后触发一次自动释放", self._threshold))
         layout.addWidget(self.divider())
 
         self._mode = SegmentedControl(
-            [("standard", "标准清理"), ("deep", "深度清理（需管理员）")], "standard")
+            [("standard", "标准释放"), ("deep", "深度释放（需管理员）")], "standard")
         self._mode.changed.connect(self._on_mode)
         layout.addWidget(self.setting_row(
-            "清理方式", "标准清理不需要管理员；深度清理会额外清空系统缓存", self._mode))
+            "释放方式", "标准释放不需要管理员；深度释放会额外清空系统缓存", self._mode))
         layout.addWidget(self.divider())
 
         self._notify_switch = ToggleSwitch()
         self._notify_switch.toggled.connect(self._on_notify)
         layout.addWidget(self.setting_row(
-            "内存释放通知", "清理完成后弹出通知，告诉你释放了多少内存",
+            "内存释放通知", "释放完成后弹出通知，告诉你释放了多少内存",
             self._notify_switch))
         self.body.addWidget(card)
 
     def _build_top(self) -> None:
-        card, layout = self.card("占用内存最多的程序", "清理后会按需重新载入，不会被关闭")
+        card, layout = self.card("占用内存最多的程序", "释放后会按需重新载入，不会被关闭")
         self._top_host = QWidget()
         self._top_layout = QVBoxLayout(self._top_host)
         self._top_layout.setContentsMargins(0, 0, 0, 0)
@@ -127,7 +125,7 @@ class CleanerPage(PageBase):
     # ------------------------------------------------------------- 事件
     def _on_auto(self, checked: bool) -> None:
         self.persist({"memory_auto": bool(checked)})
-        self.toast("已开启自动清理" if checked else "已关闭自动清理")
+        self.toast("已开启自动释放" if checked else "已关闭自动释放")
 
     def _on_threshold(self, value: float) -> None:
         self.persist({"memory_threshold": int(value)})
@@ -142,7 +140,7 @@ class CleanerPage(PageBase):
     # ------------------------------------------------------------- 刷新
     def _sync_mode_label(self) -> None:
         deep = bool(self.store.get("memory_deep"))
-        self._clean_hint.setText("深度清理 · 需要管理员权限" if deep else "标准清理 · 约 1 秒")
+        self._clean_hint.setText("深度释放 · 需要管理员权限" if deep else "标准释放 · 约 1 秒")
 
     def refresh(self) -> None:
         self._auto_switch.blockSignals(True)
@@ -168,11 +166,11 @@ class CleanerPage(PageBase):
     def _refresh_last(self) -> None:
         last = float(self.store.get("memory_last_cleanup") or 0)
         if last <= 0:
-            self._last_label.setText("还没有清理过")
+            self._last_label.setText("还没有释放过")
             return
         freed = int(self.store.get("memory_last_freed") or 0)
         when = time.strftime("%m-%d %H:%M", time.localtime(last))
-        self._last_label.setText("上次清理：%s · 释放 %s" % (when, cleaner.format_bytes(freed)))
+        self._last_label.setText("上次释放：%s · 释放 %s" % (when, cleaner.format_bytes(freed)))
 
     def refresh_live(self, update_top: bool = False) -> None:
         memory = cleaner.memory_snapshot()
@@ -189,7 +187,7 @@ class CleanerPage(PageBase):
             cpu = 0.0
         self._cpu_card.set_value("%d%%" % int(round(cpu)), "全系统平均")
         total_freed = int(self.store.get("memory_total_freed") or 0)
-        self._free_card.set_value(cleaner.format_bytes(total_freed), "自使用清理功能以来")
+        self._free_card.set_value(cleaner.format_bytes(total_freed), "自使用释放内存以来")
         self._refresh_last()
         if update_top:
             self._refresh_top()

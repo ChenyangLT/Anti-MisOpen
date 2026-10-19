@@ -66,7 +66,7 @@ DEFAULT_CONFIG = {
     },
     "first_run": True,
     "window_geometry": "",
-    # 内存清理（参考 PCL2 / Mem Reduct：只清理工作集与系统缓存，不结束任何软件）
+    # 内存释放（只清理工作集与系统缓存，不结束任何软件）
     "memory_auto": False,
     "memory_threshold": 85,
     "memory_deep": False,

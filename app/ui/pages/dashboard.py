@@ -91,7 +91,7 @@ class DashboardPage(PageBase):
             "QPushButton:hover { background: rgba(255, 255, 255, 30); }")
         self._log_button.clicked.connect(self._on_open_logs)
         actions.addWidget(self._log_button)
-        self._clean_button = QPushButton("一键清理")
+        self._clean_button = QPushButton("一键释放内存")
         self._clean_button.setCursor(Qt.PointingHandCursor)
         self._clean_button.setStyleSheet(
             "QPushButton { color: #1F54D8; background: rgba(255, 255, 255, 232);"
@@ -121,7 +121,7 @@ class DashboardPage(PageBase):
         self._hero = hero
 
     def _build_health(self) -> None:
-        clear_button = make_button("打开清理", "ghost")
+        clear_button = make_button("释放内存", "ghost")
         clear_button.clicked.connect(lambda: self.win.open_page(1))
         card, layout = self.card(
             "系统状态", "内存、CPU 与磁盘占用按比例显示，每秒刷新一次", right=clear_button)

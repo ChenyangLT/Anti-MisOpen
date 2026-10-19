@@ -83,6 +83,27 @@ def is_admin() -> bool:
         return False
 
 
+SM_DIGITIZER = 94
+SM_MAXIMUMTOUCHES = 95
+
+
+def has_touchscreen() -> bool:
+    """是否带触摸屏（Windows 7 起都支持这两个指标，读不到时按非触屏处理）。"""
+    if not is_windows():
+        return False
+    try:
+        touches = int(user32.GetSystemMetrics(SM_MAXIMUMTOUCHES))
+        if touches > 0:
+            return True
+    except Exception:
+        pass
+    try:
+        digitizer = int(user32.GetSystemMetrics(SM_DIGITIZER))
+        return bool(digitizer & 0x01) or bool(digitizer & 0x04)
+    except Exception:
+        return False
+
+
 def composition_enabled() -> bool:
     """DWM 合成是否可用（决定能否使用无边框圆角窗口）。"""
     try:

@@ -132,7 +132,7 @@ class MonitorEngine(QObject):
             self._trigger_mode = mode
             self._always_enforce = bool(snapshot.get("always_enforce_max"))
             self._focus_existing = bool(snapshot.get("focus_existing", True))
-            self._notify = bool(snapshot.get("notify", True))
+            self._notify = bool(snapshot.get("notify_block", True))
             self._rules = [AppRule.from_dict(item) for item in (snapshot.get("rules") or [])
                            if isinstance(item, dict)]
             self._exceptions = [Matcher.from_dict(item) for item in (snapshot.get("exceptions") or [])

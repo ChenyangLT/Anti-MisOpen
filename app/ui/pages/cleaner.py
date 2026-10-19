@@ -111,7 +111,7 @@ class CleanerPage(PageBase):
         self._notify_switch = ToggleSwitch()
         self._notify_switch.toggled.connect(self._on_notify)
         layout.addWidget(self.setting_row(
-            "自动清理后提示", "在窗口内显示一条轻提示，告诉你释放了多少内存",
+            "内存释放通知", "清理完成后弹出通知，告诉你释放了多少内存",
             self._notify_switch))
         self.body.addWidget(card)
 
@@ -137,7 +137,7 @@ class CleanerPage(PageBase):
         self._sync_mode_label()
 
     def _on_notify(self, checked: bool) -> None:
-        self.persist({"memory_auto_notify": bool(checked)})
+        self.persist({"notify_memory": bool(checked)})
 
     # ------------------------------------------------------------- 刷新
     def _sync_mode_label(self) -> None:
@@ -158,7 +158,7 @@ class CleanerPage(PageBase):
         self._mode.blockSignals(False)
 
         self._notify_switch.blockSignals(True)
-        self._notify_switch.setChecked(bool(self.store.get("memory_auto_notify")))
+        self._notify_switch.setChecked(bool(self.store.get("notify_memory")))
         self._notify_switch.blockSignals(False)
 
         self._sync_mode_label()

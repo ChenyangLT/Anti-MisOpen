@@ -18,6 +18,16 @@ from ...core.logbook import LogBook
 from ...core import winutil
 
 
+NOTIFY_EVENTS = (
+    ("notify_block", "限制软件多开",
+     "重复双击被拦截时弹出通知，说明为什么拦下"),
+    ("notify_junk", "清理垃圾",
+     "垃圾清理完成后报告释放了多少空间"),
+    ("notify_memory", "内存释放",
+     "内存清理完成后提示释放量，不加打扰"),
+)
+
+
 class SettingsPage(PageBase):
     def __init__(self, window):
         super().__init__(window)
@@ -26,7 +36,7 @@ class SettingsPage(PageBase):
         self.refresh()
 
     def _build(self) -> None:
-        self.page_header("设置", "启动方式、界面外观、密码保护和数据维护")
+        self.page_header("设置", "启动方式、通知、界面外观、密码保护和数据维护")
         self._build_startup()
         self._build_notifications()
         self._build_theme()
@@ -59,7 +69,18 @@ class SettingsPage(PageBase):
         self.body.addWidget(card)
 
     def _build_notifications(self) -> None:
-        card, layout = self.card("通知与提示", "拦截提示弹不出来时，可以用这里的“一键修复”恢复系统通知设置")
+        card, layout = self.card(
+            "通知与提示",
+            "拦截软件多开、清理垃圾、内存释放完成后都会弹出通知，可分别关闭")
+        self._notify_switches = {}
+        for key, title, description in NOTIFY_EVENTS:
+            switch = ToggleSwitch()
+            switch.toggled.connect(
+                lambda checked, k=key: self._on_notify_toggle(k, checked))
+            layout.addWidget(self.setting_row(title, description, switch))
+            layout.addWidget(self.divider())
+            self._notify_switches[key] = switch
+
         self._notify_badge = make_badge("检测中…", "muted")
         self._notify_status = make_label("", "muted", wrap=True)
         head = QHBoxLayout()
@@ -165,6 +186,12 @@ class SettingsPage(PageBase):
             switch.setChecked(bool(self.store.get(key)))
             switch.blockSignals(False)
 
+        for key, _title, _desc in NOTIFY_EVENTS:
+            switch = self._notify_switches[key]
+            switch.blockSignals(True)
+            switch.setChecked(bool(self.store.get(key)))
+            switch.blockSignals(False)
+
         theme_key = str(self.store.get("theme") or "light_blue")
         for key, card in self._theme_cards.items():
             card.setChecked(key == theme_key)
@@ -254,6 +281,12 @@ class SettingsPage(PageBase):
                    "success" if checked else "warning")
         self.win.refresh_pages()
         self.refresh()
+
+    def _on_notify_toggle(self, key: str, checked: bool) -> None:
+        self.persist({key: checked})
+        title = dict((k, t) for k, t, _d in NOTIFY_EVENTS).get(key, "该事件")
+        self.toast("已开启「%s」通知" % title if checked else "已关闭「%s」通知" % title,
+                   "success" if checked else "warning")
 
     def _on_tray(self, checked: bool) -> None:
         self.persist({"close_to_tray": checked})

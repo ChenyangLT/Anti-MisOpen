@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from PySide2.QtCore import (QEasingCurve, QPoint, QPropertyAnimation, QRectF,
                             QSize, Qt, QTimer, QVariantAnimation, Signal)
-from PySide2.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen
+from PySide2.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainter,
+                           QPainterPath, QPen, QPixmap)
 from PySide2.QtWidgets import (QAbstractButton, QFrame, QGraphicsOpacityEffect,
                                QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout,
                                QWidget)
@@ -64,6 +65,69 @@ class IconView(QWidget):
         palette = themes.current()
         color = palette.get(self._color_key or "text", palette["text"])
         draw_icon(painter, self._name, QRectF(self.rect()), color, self._stroke)
+
+
+class AvatarView(QWidget):
+    """圆形头像；没有网络时画一个带首字母的渐变圆，不影响布局。"""
+
+    def __init__(self, size: int = 30, text: str = "CY", parent=None):
+        super().__init__(parent)
+        self._pixmap = None
+        self._text = text
+        self.setFixedSize(size, size)
+
+    def set_image_data(self, data) -> bool:
+        if not data:
+            return False
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(data):
+            return False
+        side = min(pixmap.width(), pixmap.height())
+        left = (pixmap.width() - side) // 2
+        top = (pixmap.height() - side) // 2
+        pixmap = pixmap.copy(left, top, side, side)
+        target = max(self.width(), self.height()) * 3
+        pixmap = pixmap.scaled(target, target, Qt.KeepAspectRatio,
+                               Qt.SmoothTransformation)
+        self._pixmap = pixmap
+        self.update()
+        return True
+
+    def clear_image(self) -> None:
+        self._pixmap = None
+        self.update()
+
+    def set_text(self, text: str) -> None:
+        self._text = text or "CY"
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        palette = themes.current()
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addEllipse(rect)
+        painter.save()
+        painter.setClipPath(path)
+        if self._pixmap is not None:
+            painter.drawPixmap(self.rect(), self._pixmap)
+        else:
+            gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+            gradient.setColorAt(0.0, QColor(palette["accent_hover"]))
+            gradient.setColorAt(1.0, QColor(palette["accent"]))
+            painter.fillRect(rect, gradient)
+            painter.setPen(QPen(QColor("#FFFFFF")))
+            font = QFont(self.font())
+            font.setBold(True)
+            font.setPixelSize(max(10, int(self.height() * 0.36)))
+            painter.setFont(font)
+            painter.drawText(rect, Qt.AlignCenter, self._text)
+        painter.restore()
+        painter.setPen(QPen(QColor(palette["border_strong"]), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(rect)
+        painter.end()
 
 
 class ToggleSwitch(QAbstractButton):

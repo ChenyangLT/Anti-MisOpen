@@ -89,7 +89,7 @@ class RulesPage(PageBase):
         self._notify_switch = ToggleSwitch()
         self._notify_switch.toggled.connect(self._on_notify)
         layout.addWidget(self.setting_row(
-            "在桌面弹出提示", "拦截时在托盘弹出气泡提醒，便于知道发生了什么",
+            "拦截时弹出通知", "拦截重复启动时在桌面弹出通知，便于知道发生了什么",
             self._notify_switch))
         self.body.addWidget(card)
 
@@ -127,7 +127,7 @@ class RulesPage(PageBase):
 
         for switch, key in ((self._always_switch, "always_enforce_max"),
                             (self._focus_switch, "focus_existing"),
-                            (self._notify_switch, "notify")):
+                            (self._notify_switch, "notify_block")):
             switch.blockSignals(True)
             switch.setChecked(bool(store.get(key)))
             switch.blockSignals(False)
@@ -222,7 +222,7 @@ class RulesPage(PageBase):
         self.persist({"focus_existing": bool(checked)})
 
     def _on_notify(self, checked: bool) -> None:
-        self.persist({"notify": bool(checked)})
+        self.persist({"notify_block": bool(checked)})
 
     def _add_rule(self) -> None:
         dialog = AddTargetDialog(self.win, mode="rule",

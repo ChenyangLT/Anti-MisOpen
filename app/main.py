@@ -160,6 +160,7 @@ def main(argv=None) -> int:
     store = config.ConfigStore()
     store.save()  # 首次运行时落盘默认配置，方便用户查看和备份
     themes.set_theme(str(store.get("theme") or "light_blue"))
+    themes.set_touch(winutil.has_touchscreen())
     application.setStyleSheet(themes.qss())
 
     holder = {}

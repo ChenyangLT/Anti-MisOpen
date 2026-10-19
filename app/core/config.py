@@ -16,10 +16,12 @@ import time
 APP_ID = "AntiMisOpen"
 APP_NAME = "Anti MisOpen"
 APP_NAME_CN = "防误开"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 BUILD_DATE = "2026-10-19"
 APP_SIGNATURE = "Chen_yang_ & Deepseek V4.1 Flash 1017 Ver."
 GITHUB_URL = "https://github.com/ChenyangLT/Anti-MisOpen"
+GITHUB_LOGIN = "ChenyangLT"
+MODEL_SIGNATURE = "Deepseek V4.1 Flash 1017"
 
 ACTIONS = {
     "kill_silent": "静默结束多余实例",
@@ -48,7 +50,11 @@ DEFAULT_CONFIG = {
     "password": None,
     "theme": "light_blue",
     "close_to_tray": True,
-    "notify": True,
+    # 三类事件分别控制通知（默认全开）；旧配置里的 notify / memory_auto_notify
+    # 会在加载时自动迁移到 notify_block / notify_memory
+    "notify_block": True,
+    "notify_junk": True,
+    "notify_memory": True,
     "log_keep_days": 30,
     "paused_until": 0,
     "stats": {
@@ -64,16 +70,18 @@ DEFAULT_CONFIG = {
     "memory_auto": False,
     "memory_threshold": 85,
     "memory_deep": False,
-    "memory_auto_notify": True,
     "memory_last_cleanup": 0,
     "memory_last_freed": 0,
     "memory_total_freed": 0,
     # 垃圾清理
     "junk_selected": ["recycle", "temp"],
     "junk_use_recycle": True,
+    "junk_custom_dirs": [],
     "junk_last_cleanup": 0,
     "junk_last_freed": 0,
     "junk_total_freed": 0,
+    # 作者头像缓存时间（秒），0 表示还没有从网络取到过
+    "profile_fetched_at": 0,
 }
 
 
@@ -172,6 +180,13 @@ class ConfigStore:
             except OSError:
                 pass
         data = _deep_merge(copy.deepcopy(DEFAULT_CONFIG), raw)
+        # 旧版本只有 notify / memory_auto_notify 两个开关，迁移到新的三分类通知
+        if "notify_block" not in raw:
+            data["notify_block"] = bool(raw.get("notify", True))
+        if "notify_junk" not in raw:
+            data["notify_junk"] = True
+        if "notify_memory" not in raw:
+            data["notify_memory"] = bool(raw.get("memory_auto_notify", True))
         return data
 
     def get(self, key: str, default=None):

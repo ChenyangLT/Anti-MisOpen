@@ -10,10 +10,10 @@ from PySide2.QtCore import Qt, QUrl
 from PySide2.QtGui import QDesktopServices, QPainter, QPixmap
 from PySide2.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
-from ...core import config, hardware, themes, winutil
+from ...core import config, hardware, profile, themes, winutil
 from ..hardware_worker import HardwareThread
 from ..icons import icon_pixmap
-from ..widgets import IconView, make_badge, make_label
+from ..widgets import AvatarView, IconView, make_badge, make_label
 from .base import PageBase, clear_layout, make_button
 
 
@@ -135,30 +135,48 @@ class AboutPage(PageBase):
         card = QFrame()
         card.setObjectName("Card")
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(18)
 
-        layout.addWidget(LogoView(64), 0, Qt.AlignTop)
+        self._avatar_view = AvatarView(64, "CY")
+        layout.addWidget(self._avatar_view, 0, Qt.AlignTop)
 
         col = QVBoxLayout()
         col.setSpacing(4)
-        name = make_label("Anti MisOpen · 防误开", "h2")
-        version = make_badge("v%s" % config.APP_VERSION, "accent")
         row = QHBoxLayout()
         row.setSpacing(10)
-        row.addWidget(name)
-        row.addWidget(version)
+        self._hero_name = make_label(profile.LOGIN, "h2")
+        row.addWidget(self._hero_name)
+        row.addWidget(make_badge("v%s" % config.APP_VERSION, "accent"))
         row.addStretch(1)
+        self._avatar_refresh = make_button("刷新头像", "ghost")
+        self._avatar_refresh.clicked.connect(lambda: self.win.refresh_avatar(True))
+        row.addWidget(self._avatar_refresh, 0, Qt.AlignTop)
         col.addLayout(row)
+
+        model = make_label(profile.MODEL, "body")
+        model.setStyleSheet("font-weight: 600; color: %s;" % themes.current()["accent"])
+        col.addWidget(model)
         col.addWidget(make_label(
             "阻止同一个程序被反复双击后开出多个实例，避免电脑卡顿。"
             "适合教室、办公室等不熟悉电脑的使用环境。", "muted", wrap=True))
-        signature = make_label(config.APP_SIGNATURE, "body")
-        signature.setStyleSheet("font-weight: 600; color: %s;" % themes.current()["accent"])
+
+        self._avatar_status = make_label("正在获取 GitHub 头像…", "faint", wrap=True)
         col.addSpacing(2)
-        col.addWidget(signature)
+        col.addWidget(self._avatar_status)
         layout.addLayout(col, 1)
         self.body.addWidget(card)
+
+    def set_avatar(self, result: dict) -> None:
+        """由主窗口在后台取到头像后调用。"""
+        result = result or {}
+        data = result.get("data")
+        if data:
+            self._avatar_view.set_image_data(data)
+        self._avatar_status.setText(profile.source_text(result))
+        self._avatar_refresh.setEnabled(True)
+        if result.get("ok") and not result.get("cached"):
+            self.win.show_toast("已更新 GitHub 头像与作者信息", "success")
 
     def _build_how(self) -> None:
         card, layout = self.card("它是怎么工作的")

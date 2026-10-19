@@ -164,6 +164,18 @@ def is_dark() -> bool:
     return bool(_current.get("dark"))
 
 
+_TOUCH = {"enabled": False}
+
+
+def set_touch(enabled: bool) -> None:
+    """触屏模式：滚动条更宽、按钮更高，方便手指点按。"""
+    _TOUCH["enabled"] = bool(enabled)
+
+
+def touch_enabled() -> bool:
+    return bool(_TOUCH["enabled"])
+
+
 _QSS = Template("""
 * { outline: none; }
 
@@ -202,6 +214,8 @@ QLabel[role="faint"]      { font-size: 8.5pt; color: $faint; }
 QLabel[role="value"]      { font-size: 23pt; font-weight: 700; color: $text; }
 QLabel[role="sideTitle"]  { color: #FFFFFF; font-size: 12.5pt; font-weight: 600; }
 QLabel[role="sideSub"]    { color: $sidebar_text; font-size: 8pt; }
+QLabel[role="sideName"]   { color: #FFFFFF; font-size: 9.5pt; font-weight: 600; }
+QLabel[role="sideModel"]  { color: $sidebar_text; font-size: 7.5pt; }
 QLabel[role="heroTitle"]  { color: $hero_text; font-size: 17pt; font-weight: 700; }
 QLabel[role="heroSub"]    { color: rgba(255, 255, 255, 215); font-size: 9.5pt; }
 QLabel[role="heroMeta"]   { color: rgba(255, 255, 255, 165); font-size: 8.5pt; }
@@ -239,6 +253,7 @@ QPushButton {
     border: 1px solid $border;
     border-radius: 9px;
     padding: 8px 16px;
+    min-height: $button_min;
     font-size: 9.5pt;
     font-weight: 500;
     color: $text;
@@ -344,19 +359,19 @@ QLabel#Badge[tone="muted"]   { background: $card_soft;    color: $muted; }
 QScrollArea { border: none; }
 QScrollBar:vertical {
     background: transparent;
-    width: 10px;
+    width: $scroll_width;
     margin: 2px 2px 2px 0;
 }
 QScrollBar::handle:vertical {
     background: $border_strong;
-    border-radius: 4px;
-    min-height: 30px;
+    border-radius: $scroll_radius;
+    min-height: $scroll_min;
 }
 QScrollBar::handle:vertical:hover { background: $faint; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-QScrollBar:horizontal { background: transparent; height: 10px; }
-QScrollBar::handle:horizontal { background: $border_strong; border-radius: 4px; min-width: 30px; }
+QScrollBar:horizontal { background: transparent; height: $scroll_width; }
+QScrollBar::handle:horizontal { background: $border_strong; border-radius: $scroll_radius; min-width: $scroll_min; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }
 
@@ -400,7 +415,13 @@ QSizeGrip { background: transparent; width: 14px; height: 14px; }
 
 
 def build_stylesheet(palette: dict = None) -> str:
-    p = palette or _current
+    p = dict(palette or _current)
+    if _TOUCH["enabled"]:
+        p.update({"scroll_width": "16px", "scroll_radius": "7px",
+                  "scroll_min": "44px", "button_min": "34px"})
+    else:
+        p.update({"scroll_width": "10px", "scroll_radius": "4px",
+                  "scroll_min": "30px", "button_min": "0px"})
     return _QSS.substitute(p)
 
 

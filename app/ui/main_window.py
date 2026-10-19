@@ -8,16 +8,17 @@ import os
 import sys
 import time
 
-from PySide2.QtCore import QByteArray, QRectF, Qt, QTimer
+from PySide2.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QThread, QTimer, Signal
 from PySide2.QtGui import (QColor, QCursor, QIcon, QPainter, QPainterPath,
                            QPen, QPixmap)
 from PySide2.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel,
-                               QListWidget, QListWidgetItem, QMenu, QStackedWidget,
-                               QSystemTrayIcon, QVBoxLayout, QWidget)
+                               QListWidget, QListWidgetItem, QMenu, QScrollBar,
+                               QScroller, QStackedWidget, QSystemTrayIcon,
+                               QVBoxLayout, QWidget)
 
 import psutil
 
-from ..core import autostart, cleaner, config, themes, winutil
+from ..core import autostart, cleaner, config, profile, themes, winutil
 from ..core.logbook import LogBook
 from ..core.monitor import MonitorEngine
 from . import icons
@@ -30,9 +31,28 @@ from .pages.exceptions import ExceptionsPage
 from .pages.junk import JunkPage
 from .pages.rules import RulesPage
 from .pages.settings import SettingsPage
-from .widgets import IconView, NavButton, Toast, WindowButton, make_badge, make_label
+from .widgets import (AvatarView, IconView, NavButton, Toast, WindowButton,
+                      make_badge, make_label)
 
 PAGES = ("概览", "清理", "垃圾清理", "规则", "例外", "设置", "关于")
+
+
+class AvatarThread(QThread):
+    """后台取 GitHub 头像，避免学校网络慢时卡住界面。"""
+
+    done = Signal(dict)
+
+    def __init__(self, force: bool = False, parent=None):
+        super().__init__(parent)
+        self._force = force
+
+    def run(self):
+        try:
+            result = profile.fetch_avatar(force=self._force)
+        except Exception as exc:  # 任何意外都不能影响主程序
+            result = {"ok": False, "data": None, "source": "内置占位",
+                      "cached": False, "error": str(exc)}
+        self.done.emit(result)
 
 
 class LogoMark(QWidget):
@@ -129,6 +149,11 @@ class MainWindow(QWidget):
         self._tray_tip_shown = False
         self._last_save = time.time()
         self._clean_thread = None
+        self._avatar_thread = None
+        self._profile_result = profile.load_cached()
+        # 触屏设备：滚动条加宽、按钮增高，并开启手指拖动滚动
+        self._touch = winutil.has_touchscreen()
+        themes.set_touch(self._touch)
 
         self.setObjectName("Root")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -151,6 +176,11 @@ class MainWindow(QWidget):
         self.open_page(0)
         self.apply_config()
         self.apply_theme(str(self.store.get("theme") or "light_blue"), refresh=False)
+        if self._touch:
+            self._enable_touch_scrolling()
+        # 先显示缓存的头像，再在后台尝试更新
+        self._apply_avatar(self._profile_result)
+        QTimer.singleShot(700, lambda: self.refresh_avatar(False))
         # 在窗口第一次显示前就把图标写入窗口与窗口类，避免任务栏按钮先按“无图标”
         # 创建，之后即使 WM_SETICON 成功也不再刷新。
         self.winId()
@@ -223,9 +253,22 @@ class MainWindow(QWidget):
         status_row.addWidget(self._side_status, 1)
         side.addLayout(status_row)
 
-        wordmark = make_label("v%s  ·  %s" % (config.APP_VERSION, config.APP_SIGNATURE), "wordmark")
-        wordmark.setContentsMargins(10, 4, 4, 0)
-        wordmark.setWordWrap(True)
+        profile_row = QHBoxLayout()
+        profile_row.setContentsMargins(10, 4, 4, 0)
+        profile_row.setSpacing(9)
+        self._side_avatar = AvatarView(30, "CY")
+        profile_row.addWidget(self._side_avatar, 0, Qt.AlignVCenter)
+        profile_text = QVBoxLayout()
+        profile_text.setSpacing(1)
+        self._side_login = make_label(profile.LOGIN, "sideName")
+        self._side_model = make_label(profile.MODEL, "sideModel")
+        profile_text.addWidget(self._side_login)
+        profile_text.addWidget(self._side_model)
+        profile_row.addLayout(profile_text, 1)
+        side.addLayout(profile_row)
+
+        wordmark = make_label("v%s  ·  %s" % (config.APP_VERSION, config.APP_NAME_CN), "wordmark")
+        wordmark.setContentsMargins(10, 2, 4, 0)
         side.addWidget(wordmark)
 
         outer.addWidget(self._sidebar)
@@ -265,6 +308,74 @@ class MainWindow(QWidget):
         outer.addWidget(content, 1)
 
         self._toast = Toast(self)
+
+    # ------------------------------------------------------------- 作者信息
+    def _apply_avatar(self, result: dict) -> None:
+        self._profile_result = result or {}
+        data = (result or {}).get("data")
+        if data:
+            self._side_avatar.set_image_data(data)
+        about = self._pages[6] if len(self._pages) > 6 else None
+        if about is not None and hasattr(about, "set_avatar"):
+            try:
+                about.set_avatar(result)
+            except Exception:
+                pass
+
+    def refresh_avatar(self, force: bool = False) -> None:
+        if self._avatar_thread is not None and self._avatar_thread.isRunning():
+            return
+        self._avatar_thread = AvatarThread(bool(force), self)
+        self._avatar_thread.done.connect(self._on_avatar_ready)
+        self._avatar_thread.start()
+
+    def _on_avatar_ready(self, result: dict) -> None:
+        self._apply_avatar(result)
+        if result.get("ok") and not result.get("cached"):
+            try:
+                self.store.set("profile_fetched_at", int(result.get("fetched_at")
+                                                         or time.time()))
+                self.store.save()
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------- 触屏
+    def _enable_touch_scrolling(self) -> None:
+        for page in self._pages:
+            area = getattr(page, "_scroll", None)
+            if area is None:
+                continue
+            try:
+                viewport = area.viewport()
+                QScroller.grabGesture(viewport, QScroller.LeftMouseButtonGesture)
+                scroller = QScroller.scroller(viewport)
+                scroller.setScrollMetric(QScroller.AxisLockThreshold, 0.2)
+            except Exception:
+                continue
+
+    def _over_scrollbar(self, pos: QPoint) -> bool:
+        """鼠标/手指是否落在页面滚动条上（用于避免误触发窗口缩放）。"""
+        page = self._stack.currentWidget() if self._stack.count() else None
+        area = getattr(page, "_scroll", None) if page is not None else None
+        if area is None:
+            return False
+        try:
+            bar = area.verticalScrollBar()
+            if bar is not None and bar.isVisible():
+                top_left = bar.mapTo(self, QPoint(0, 0))
+                if QRect(top_left, bar.size()).contains(pos):
+                    return True
+        except Exception:
+            pass
+        try:
+            widget = QApplication.widgetAt(self.mapToGlobal(pos))
+            while widget is not None:
+                if isinstance(widget, QScrollBar):
+                    return True
+                widget = widget.parentWidget()
+        except Exception:
+            pass
+        return False
 
     # ------------------------------------------------------------- 托盘
     def _build_tray(self) -> None:
@@ -373,14 +484,12 @@ class MainWindow(QWidget):
 
         name = str(entry.get("name") or "某个程序")
         killed = bool(entry.get("killed"))
-        if bool(self.store.get("notify")):
-            message = ("已关闭 %s 的多余窗口" % name) if killed else ("检测到 %s 重复启动" % name)
-            if self.isVisible() and not self.isMinimized():
-                self.show_toast(message, "warning" if killed else "info")
-            if self._tray.isVisible():
-                self._tray.showMessage(config.APP_NAME,
-                                       message + "\n重复双击已拦截，电脑保持流畅。",
-                                       QSystemTrayIcon.Warning, 3500)
+        message = ("已关闭 %s 的多余窗口" % name) if killed else ("检测到 %s 重复启动" % name)
+        if self.isVisible() and not self.isMinimized():
+            self.show_toast(message, "warning" if killed else "info")
+        self.push_notification("notify_block", config.APP_NAME,
+                               message + "\n重复双击已拦截，电脑保持流畅。",
+                               QSystemTrayIcon.Warning)
         self._sync_tray()
         try:
             self._pages[0].refresh()
@@ -460,8 +569,10 @@ class MainWindow(QWidget):
             summary = "已释放 %s 内存" % cleaner.format_bytes(freed)
         else:
             summary = "内存已经比较清爽"
+        self.push_notification("notify_memory", "内存释放",
+                               summary + (" · 自动清理" if source == "auto" else ""))
         if source == "auto":
-            if bool(self.store.get("memory_auto_notify")):
+            if bool(self.store.get("notify_memory")):
                 self.show_toast("自动清理完成：%s" % summary, "success")
         else:
             self.show_toast("%s · 清理了 %d 个进程" % (summary, int(result.get("trimmed") or 0)),
@@ -487,6 +598,21 @@ class MainWindow(QWidget):
     def show_toast(self, text: str, tone: str = "success") -> None:
         self._toast.show_message(text, tone)
         self._toast.raise_()
+
+    def push_notification(self, key: str, title: str, message: str,
+                          icon=None, msec: int = 3500) -> bool:
+        """按设置里的开关发送系统通知；返回是否真的发送了。"""
+        if icon is None:
+            icon = QSystemTrayIcon.Information
+        try:
+            if not bool(self.store.get(key)):
+                return False
+        except Exception:
+            return False
+        if not self._tray.isVisible():
+            return False
+        self._tray.showMessage(title, message, icon, msec)
+        return True
 
     def test_notification(self) -> None:
         """从设置页触发的一条通知测试，同时走托盘气泡和窗口内 Toast。"""
@@ -534,6 +660,7 @@ class MainWindow(QWidget):
 
     def apply_theme(self, key: str, refresh: bool = True) -> None:
         themes.set_theme(key)
+        themes.set_touch(self._touch)
         application = QApplication.instance()
         if application is not None:
             application.setStyleSheet(themes.qss())
@@ -726,9 +853,12 @@ class MainWindow(QWidget):
                     position = self.mapFromGlobal(QCursor.pos())
                     width, height = self.width(), self.height()
                     x, y = position.x(), position.y()
-                    border, caption = 8, 46
+                    border, caption = (11, 46) if self._touch else (8, 46)
                     left, right = x < border, x > width - border
                     top, bottom = y < border, y > height - border
+                    # 右侧滚动条正好压在缩放边缘上：触屏拖滚动条时不要变成调整窗口大小
+                    if (left or right or top or bottom) and self._over_scrollbar(position):
+                        return True, 1  # HTCLIENT，交给滚动条自己处理
                     if top and left:
                         return True, 13  # HTTOPLEFT
                     if top and right:

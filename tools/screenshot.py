@@ -17,15 +17,17 @@ sys.path.insert(0, ROOT)
 SHOT_DIR = os.path.join(ROOT, "screenshots")
 os.makedirs(SHOT_DIR, exist_ok=True)
 
+real_avatar_dir = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "AntiMisOpen")
 sandbox = tempfile.mkdtemp(prefix="antimisopen-shot-")
 os.environ["APPDATA"] = sandbox
 os.environ["QT_QPA_PLATFORM"] = "windows"  # offscreen 平台不渲染文字，必须用真实平台
+os.environ["ANTIMISOPEN_OFFLINE"] = "1"  # 截图时不要联网等头像
 
-from PySide2.QtCore import QEvent, Qt  # noqa: E402
+from PySide2.QtCore import QEvent, QPoint, Qt  # noqa: E402
 from PySide2.QtGui import QFont  # noqa: E402
 from PySide2.QtWidgets import QApplication  # noqa: E402
 
-from app.core import config, themes  # noqa: E402
+from app.core import config, profile, themes  # noqa: E402
 from app.core.logbook import LogBook  # noqa: E402
 from app.ui.main_window import MainWindow  # noqa: E402
 
@@ -52,11 +54,14 @@ def seed(store: config.ConfigStore) -> None:
         "memory_auto": True,
         "memory_threshold": 85,
         "memory_deep": False,
-        "memory_auto_notify": True,
+        "notify_block": True,
+        "notify_junk": True,
+        "notify_memory": True,
         "memory_last_cleanup": now - 600,
         "memory_last_freed": int(1.8 * 1024 ** 3),
         "memory_total_freed": int(12.4 * 1024 ** 3),
-        "junk_selected": ["recycle", "temp"],
+        "junk_selected": ["recycle", "temp", "custom"],
+        "junk_custom_dirs": [r"C:\Users\Public\Pictures", r"C:\Users\Public\Videos"],
         "junk_use_recycle": True,
         "junk_last_cleanup": now - 86400,
         "junk_last_freed": int(1.3 * 1024 ** 3),
@@ -109,6 +114,9 @@ def main() -> int:
     config.app_data_dir = lambda: demo_dir
     config.config_path = lambda: os.path.join(demo_dir, "config.json")
     config.log_dir = lambda: os.path.join(demo_dir, "logs")
+    # 用本机真实缓存的 GitHub 头像，展示最终效果（免联网）
+    profile.cache_paths = lambda: (os.path.join(real_avatar_dir, "avatar.png"),
+                                   os.path.join(real_avatar_dir, "avatar.json"))
 
     themes.set_theme(str(store.get("theme") or "light_blue"))
     application.setStyleSheet(themes.qss())
@@ -162,6 +170,20 @@ def main() -> int:
         path = os.path.join(SHOT_DIR, "%s.png" % name)
         window.grab().save(path)
         print("saved", path)
+
+        if name == "junk":
+            # 再截一张滚到“自定义目录”的图，README 里展示这个新功能
+            page = window._pages[index]
+            bar = page._scroll.verticalScrollBar()
+            top = page._custom_host.mapTo(page._scroll.widget(), QPoint(0, 0)).y()
+            bar.setValue(max(0, top - 110))
+            for _ in range(6):
+                application.processEvents()
+            time.sleep(0.15)
+            path2 = os.path.join(SHOT_DIR, "junk-custom.png")
+            window.grab().save(path2)
+            print("saved", path2)
+            bar.setValue(0)
 
     # 深色主题预览
     window.apply_theme("dark_neon")

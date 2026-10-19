@@ -7,31 +7,36 @@ import subprocess
 import time
 
 from PySide2.QtCore import Qt, QThread, QTimer, Signal
-from PySide2.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
+from PySide2.QtWidgets import (QFileDialog, QHBoxLayout, QSizePolicy,
+                               QVBoxLayout, QWidget)
 
 from ...core import junk
 from ...core.cleaner import format_bytes
-from ..dialogs import ConfirmDialog
+from ..dialogs import JunkCleanDialog
 from ..widgets import StatCard, ToggleSwitch, make_label
-from .base import PageBase, make_button
+from .base import PageBase, clear_layout, make_button
 
 
 class _JunkWorker(QThread):
     done = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, mode, selected, use_recycle, parent=None):
+    def __init__(self, mode, selected, use_recycle, custom_dirs=None,
+                 keep_days=0, parent=None):
         super().__init__(parent)
         self.mode = mode
         self.selected = list(selected)
         self.use_recycle = bool(use_recycle)
+        self.custom_dirs = list(custom_dirs or [])
+        self.keep_days = int(keep_days or 0)
 
     def run(self):
         try:
             if self.mode == "scan":
-                result = junk.scan()
+                result = junk.scan(self.custom_dirs)
             else:
-                result = junk.clean(self.selected, self.use_recycle)
+                result = junk.clean(self.selected, self.use_recycle,
+                                    self.custom_dirs, self.keep_days)
             self.done.emit(result)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))
@@ -58,11 +63,12 @@ class JunkPage(PageBase):
         self._clean_button.clicked.connect(self._on_clean)
         self.page_header(
             "垃圾清理",
-            "定期清掉电教电脑里越积越多的图片、下载、临时文件和回收站",
+            "定期清掉电教电脑里越积越多的图片、下载、临时文件、回收站和自定义目录",
             actions=[self._clean_button, self._scan_button])
 
         self._build_stats()
         self._build_categories()
+        self._build_custom()
         self._build_options()
         self.hint("清理只针对上面勾选的内容，不会动系统文件和已安装的软件。"
                   "下载、图片、视频默认先移到回收站，误删可以恢复；回收站需要另外勾选才会清空。")
@@ -82,7 +88,8 @@ class JunkPage(PageBase):
     def _build_categories(self) -> None:
         card, layout = self.card(
             "可清理的内容", "默认勾选回收站和临时文件；下载、图片、视频里是个人文件，请确认后再勾选")
-        for index, category in enumerate(junk.CATEGORIES):
+        listed = [c for c in junk.CATEGORIES if c["id"] != "custom"]
+        for index, category in enumerate(listed):
             switch = ToggleSwitch()
             switch.toggled.connect(
                 lambda checked, cid=category["id"]: self._on_toggle(cid, checked))
@@ -100,9 +107,110 @@ class JunkPage(PageBase):
             box_layout.addWidget(size)
             box_layout.addWidget(switch)
             layout.addWidget(self.setting_row(category["title"], category["hint"], box))
-            if index != len(junk.CATEGORIES) - 1:
+            if index != len(listed) - 1:
                 layout.addWidget(self.divider())
         self.body.addWidget(card)
+
+    def _build_custom(self) -> None:
+        add_button = make_button("添加目录", "ghost")
+        add_button.clicked.connect(self._on_add_dir)
+        card, layout = self.card(
+            "自定义目录",
+            "把经常需要清理的文件夹加进来，比如课件、录制视频、下载区",
+            right=add_button)
+
+        switch = ToggleSwitch()
+        switch.toggled.connect(
+            lambda checked: self._on_toggle("custom", checked))
+        self._switches["custom"] = switch
+        self._custom_switch = switch
+        layout.addWidget(self.setting_row(
+            "参与清理", "勾选后这些目录会一起统计，清理时按所选方式处理", switch))
+        layout.addWidget(self.divider())
+
+        self._custom_host = QWidget()
+        self._custom_layout = QVBoxLayout(self._custom_host)
+        self._custom_layout.setContentsMargins(0, 0, 0, 0)
+        self._custom_layout.setSpacing(2)
+        layout.addWidget(self._custom_host)
+
+        self._custom_empty = make_label(
+            "还没有自定义目录。点右上角“添加目录”，选择要定期清理的文件夹。", "faint", wrap=True)
+        layout.addWidget(self._custom_empty)
+        self.body.addWidget(card)
+
+    def _custom_dirs(self):
+        return junk.normalize_dirs(self.store.get("junk_custom_dirs") or [])
+
+    def _save_custom_dirs(self, dirs) -> None:
+        self.store.update({"junk_custom_dirs": junk.normalize_dirs(dirs)})
+        self.store.save()
+
+    def _on_add_dir(self) -> None:
+        start = os.path.join(os.path.expanduser("~"), "Desktop")
+        if not os.path.isdir(start):
+            start = os.path.expanduser("~")
+        path = QFileDialog.getExistingDirectory(
+            self.win, "选择要定期清理的目录", start,
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks)
+        if not path:
+            return
+        dirs = self._custom_dirs()
+        normalized = junk.normalize_dirs(dirs + [path])
+        if len(normalized) == len(dirs):
+            self.toast("这个目录已经在列表里了", "warning")
+            return
+        self._save_custom_dirs(normalized)
+        if not self._custom_switch.isChecked():
+            self._custom_switch.setChecked(True)
+        self._rebuild_custom_dirs()
+        self.toast("已添加目录：%s" % path, "success")
+        self._start_scan(force=True)
+
+    def _on_remove_dir(self, path: str) -> None:
+        dirs = [item for item in self._custom_dirs()
+                if item.lower() != path.lower()]
+        self._save_custom_dirs(dirs)
+        self._rebuild_custom_dirs()
+        self.toast("已移除目录", "warning")
+        self._start_scan(force=True)
+
+    def _rebuild_custom_dirs(self) -> None:
+        clear_layout(self._custom_layout)
+        dirs = self._custom_dirs()
+        details = {}
+        for item in (self._scan.get("custom_dirs") or []):
+            details[str(item.get("path") or "").lower()] = item
+        self._custom_empty.setVisible(not dirs)
+
+        for path in dirs:
+            info = details.get(path.lower()) or {}
+            box = QWidget()
+            row_layout = QHBoxLayout(box)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(12)
+
+            titles = QVBoxLayout()
+            titles.setSpacing(2)
+            label = make_label(path, "body")
+            label.setWordWrap(True)
+            titles.addWidget(label)
+            if info and info.get("exists", True):
+                size_text = "%s · %s 项" % (
+                    format_bytes(int(info.get("bytes") or 0)),
+                    format("{:,}".format(int(info.get("items") or 0))))
+            elif info:
+                size_text = "目录不存在或无法访问"
+            else:
+                size_text = "等待扫描…"
+            titles.addWidget(make_label(size_text, "faint"))
+            row_layout.addLayout(titles, 1)
+
+            remove = make_button("移除", "ghost")
+            remove.clicked.connect(
+                lambda _checked=False, p=path: self._on_remove_dir(p))
+            row_layout.addWidget(remove, 0, Qt.AlignVCenter)
+            self._custom_layout.addWidget(box)
 
     def _build_options(self) -> None:
         card, layout = self.card("清理方式", "决定个人文件夹里的内容删掉后还能不能找回来")
@@ -139,7 +247,8 @@ class JunkPage(PageBase):
         self._scan_button.setEnabled(False)
         self._scan_button.setText("扫描中…")
         self._total_card.set_value("—", "正在统计占用空间…")
-        self._thread = _JunkWorker("scan", self._selected_ids(), True, self)
+        self._thread = _JunkWorker("scan", self._selected_ids(), True,
+                                   self._custom_dirs(), 0, self)
         self._thread.done.connect(self._on_scan_done)
         self._thread.failed.connect(self._on_thread_failed)
         self._thread.finished.connect(self._on_thread_finished)
@@ -168,6 +277,7 @@ class JunkPage(PageBase):
             format_bytes(total),
             "%s 项 · 上次扫描 %s" % (format("{:,}".format(total_items)),
                                     time.strftime("%H:%M", time.localtime(self._last_scan))))
+        self._rebuild_custom_dirs()
         self._update_selected()
         self._freed_card.set_value(
             format_bytes(int(self.store.get("junk_total_freed") or 0)),
@@ -221,20 +331,26 @@ class JunkPage(PageBase):
             info = categories.get(category["id"]) or {}
             detail = "%s · %s 项" % (format_bytes(int(info.get("bytes") or 0)),
                                      format("{:,}".format(int(info.get("items") or 0))))
+            if category["id"] == "custom":
+                custom_dirs = junk.normalize_dirs(
+                    self.store.get("junk_custom_dirs") or [])
+                detail = "%s · %s 个目录" % (
+                    format_bytes(int(info.get("bytes") or 0)),
+                    format("{:,}".format(len(custom_dirs))))
             lines.append("· %s（%s）" % (category["title"], detail))
         use_recycle = bool(self._recycle_switch.isChecked())
-        body = "将清理：\n%s\n\n%s" % (
-            "\n".join(lines),
-            "下载、图片、视频会移到回收站，误删可以恢复。" if use_recycle
-            else "所有内容会直接删除，无法恢复。")
-        if not ConfirmDialog.confirm(self.win, "确认清理", body, "开始清理", danger=True):
+        summary = "将清理：\n%s" % "\n".join(lines)
+        dialog = JunkCleanDialog(self.win, summary, use_recycle)
+        if dialog.exec_() != dialog.Accepted or dialog.keep_days is None:
             return
+        keep_days = int(dialog.keep_days)
 
         self._cleaning = True
         self._scanning = False
         self._clean_button.setEnabled(False)
         self._clean_button.setText("清理中…")
-        self._thread = _JunkWorker("clean", selected, use_recycle, self)
+        self._thread = _JunkWorker("clean", selected, use_recycle,
+                                   self._custom_dirs(), keep_days, self)
         self._thread.done.connect(self._on_clean_done)
         self._thread.failed.connect(self._on_thread_failed)
         self._thread.finished.connect(self._on_thread_finished)
@@ -245,8 +361,10 @@ class JunkPage(PageBase):
         removed = int(result.get("removed") or 0)
         moved = int(result.get("moved") or 0)
         failed = int(result.get("failed") or 0)
+        kept = int(result.get("kept") or 0)
+        skipped_recycle = bool(result.get("skipped_recycle"))
 
-        if freed or removed:
+        if freed or removed or moved:
             total = int(self.store.get("junk_total_freed") or 0) + freed
             self.store.update({
                 "junk_total_freed": total,
@@ -255,15 +373,29 @@ class JunkPage(PageBase):
             })
             self.store.save()
 
+        parts = []
+        if freed or removed:
+            parts.append("释放 %s，处理 %s 项" % (
+                format_bytes(freed), format("{:,}".format(removed))))
         if moved:
-            self.toast("已把 %s 项移到回收站，如需腾出空间请在回收站中清空" % format("{:,}".format(moved)),
-                       "success")
-        elif freed or removed:
-            self.toast("清理完成，释放了 %s" % format_bytes(freed), "success")
+            parts.append("另有 %s 项移到回收站" % format("{:,}".format(moved)))
+        if kept:
+            parts.append("保留 %s 项最近 %d 天内的文件" % (
+                format("{:,}".format(kept)), junk.KEEP_DAYS))
+        if skipped_recycle:
+            parts.append("回收站无法按时间筛选，本次未清空")
+        message = "，".join(parts) if parts else "没有可清理的内容"
+
+        if parts:
+            self.toast("清理完成：%s" % message, "success")
         else:
             self.toast("没有可清理的内容", "warning")
         if failed:
             self.toast("%s 项被占用，已跳过" % format("{:,}".format(failed)), "warning")
+        try:
+            self.win.push_notification("notify_junk", "垃圾清理完成", message)
+        except Exception:  # noqa: BLE001
+            pass
 
         self._freed_card.set_value(
             format_bytes(int(self.store.get("junk_total_freed") or 0)),
@@ -292,4 +424,5 @@ class JunkPage(PageBase):
         self._freed_card.set_value(
             format_bytes(int(self.store.get("junk_total_freed") or 0)),
             "自使用垃圾清理以来")
+        self._rebuild_custom_dirs()
         self._update_selected()

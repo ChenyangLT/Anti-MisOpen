@@ -11,7 +11,7 @@ from PySide2.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QPushButton,
                                QSizePolicy, QVBoxLayout, QWidget)
 
-from ..core import config, themes, winutil
+from ..core import config, junk, themes, winutil
 from ..core.rules import Matcher, normalize_name, normalize_path
 from .icons import to_color
 from .widgets import (IconView, SegmentedControl, Stepper, WindowButton,
@@ -426,6 +426,49 @@ class ConfirmDialog(BaseDialog):
                          tone="danger" if danger else "primary")
         label = make_label(message, "body", wrap=True)
         self.body.addWidget(label)
+
+
+class JunkCleanDialog(BaseDialog):
+    """垃圾清理方式：全部清除 / 保留 7 天内的文件 / 取消。"""
+
+    def __init__(self, parent=None, summary: str = "", use_recycle: bool = True):
+        super().__init__(parent, "开始清理", "选择清理方式，点下去才会真正删除文件",
+                         width=480, ok_text="全部清除", cancel_text="取消",
+                         tone="danger")
+        self.keep_days = None
+        if summary:
+            self.body.addWidget(make_label(summary, "body", wrap=True))
+
+        self._all_button = QPushButton("全部清除所选内容")
+        self._all_button.setProperty("variant", "danger")
+        self._all_button.clicked.connect(self._choose_all)
+        self.body.addWidget(self._all_button)
+
+        self._keep_button = QPushButton("保留 %d 天内的文件，只清更早的" % junk.KEEP_DAYS)
+        self._keep_button.setProperty("variant", "primary")
+        self._keep_button.clicked.connect(self._choose_keep)
+        self.body.addWidget(self._keep_button)
+
+        if use_recycle:
+            note = ("全部清除时，下载 / 图片 / 视频和自定义目录里的个人文件会先移到回收站，"
+                    "清空回收站后才真正释放空间；“保留 %d 天内”会直接删除更早的文件，"
+                    "最近 %d 天用过的文件不会被动。" % (junk.KEEP_DAYS, junk.KEEP_DAYS))
+        else:
+            note = ("当前设置为直接删除（不经过回收站）。“保留 %d 天内”只清理修改时间"
+                    "早于 %d 天的文件。" % (junk.KEEP_DAYS, junk.KEEP_DAYS))
+        self.body.addWidget(make_label(note, "faint", wrap=True))
+
+    def _choose_all(self) -> None:
+        self.keep_days = 0
+        self.accept()
+
+    def _choose_keep(self) -> None:
+        self.keep_days = junk.KEEP_DAYS
+        self.accept()
+
+    def _on_ok(self) -> None:
+        self.keep_days = 0
+        self.accept()
 
 
 class PauseDialog(BaseDialog):

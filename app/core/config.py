@@ -16,8 +16,8 @@ import time
 APP_ID = "AntiMisOpen"
 APP_NAME = "Anti MisOpen"
 APP_NAME_CN = "防误开"
-APP_VERSION = "1.1.0"
-BUILD_DATE = "2026-10-18"
+APP_VERSION = "1.2.0"
+BUILD_DATE = "2026-10-19"
 APP_SIGNATURE = "Chen_yang_ & Deepseek V4.1 Flash 1017 Ver."
 GITHUB_URL = "https://github.com/ChenyangLT/Anti-MisOpen"
 
@@ -36,6 +36,9 @@ DEFAULT_CONFIG = {
     "window_seconds": 5.0,
     "max_instances": 1,
     "action": "kill_notify",
+    # 判断“用户主动启动”的方式：smart=智能识别（默认），shell=只看桌面/开始菜单，
+    # any=所有新进程都算（仅用于排查问题，容易误伤）
+    "trigger_mode": "smart",
     "always_enforce_max": False,
     "focus_existing": True,
     "exceptions": [
@@ -65,6 +68,12 @@ DEFAULT_CONFIG = {
     "memory_last_cleanup": 0,
     "memory_last_freed": 0,
     "memory_total_freed": 0,
+    # 垃圾清理
+    "junk_selected": ["recycle", "temp"],
+    "junk_use_recycle": True,
+    "junk_last_cleanup": 0,
+    "junk_last_freed": 0,
+    "junk_total_freed": 0,
 }
 
 

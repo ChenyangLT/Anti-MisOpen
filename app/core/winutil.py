@@ -157,21 +157,22 @@ def is_real_window(hwnd: int) -> bool:
     return True
 
 
-def find_main_window(pid: int) -> int:
+def find_main_window(pid: int, require_title: bool = True) -> int:
     """返回该进程的第一个“主窗口”句柄，找不到返回 0。"""
     for hwnd in _enum_windows():
         if window_pid(hwnd) != pid:
             continue
         if not is_real_window(hwnd):
             continue
-        if not window_title(hwnd).strip():
+        if require_title and not window_title(hwnd).strip():
             continue
         return hwnd
     return 0
 
 
-def has_visible_window(pid: int) -> bool:
-    return find_main_window(pid) != 0
+def has_visible_window(pid: int, require_title: bool = True) -> bool:
+    """进程是否已经显示出主窗口；启动判定时允许窗口暂时没有标题。"""
+    return find_main_window(pid, require_title=require_title) != 0
 
 
 def activate_window(hwnd: int) -> bool:

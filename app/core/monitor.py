@@ -20,6 +20,11 @@ LAUNCH_PARENTS = {
     "shellexperiencehost.exe",
     "searchapp.exe",
     "searchhost.exe",
+    "sihost.exe",
+    "appinfo.exe",
+    # 第三方桌面整理 / 电脑管家 / 启动器最常见的宿主
+    "desktopmgr.exe", "desktopmanager.exe", "qqpctray.exe", "qqpcrtp.exe",
+    "360se6.exe", "360tray.exe", "baidunotify.exe",
 }
 
 # 永远不处理的系统进程
@@ -41,7 +46,20 @@ SYSTEM_NAMES = {
 
 INSTALLER_HINTS = ("setup", "install", "unins", "update", "msiexec", "patch")
 
+# 程序自己派生的辅助进程常见特征：命中后不当作“用户又启动了一次”
+HELPER_HINTS = (
+    "helper", "renderer", "crashpad", "crashhandler", "crashreport", "webview",
+    "cef", "utility", "updater", "telemetry", "minidump", "werfault",
+    "elevation_service", "notification_helper",
+)
+HELPER_FLAGS = (
+    "--type=", "--utility-sub-type", "--no-startup-window", "--background",
+    "--service", "--crashpad-handler", "--monitor-self",
+)
+
 POLL_INTERVAL = 0.2
+# 等新进程把窗口建出来的最长时间；超过后按真实启动处理，避免启动慢的程序漏判。
+LAUNCH_WINDOW_WAIT = 4.0
 SELF_NAME = os.path.basename(os.path.abspath(__import__("sys").executable)).lower()
 
 
@@ -63,6 +81,7 @@ class MonitorEngine(QObject):
         self._window_seconds = 5.0
         self._max_instances = 1
         self._action = "kill_notify"
+        self._trigger_mode = "smart"
         self._always_enforce = False
         self._focus_existing = True
         self._notify = True
@@ -72,6 +91,8 @@ class MonitorEngine(QObject):
         self._known = {}
         self._exe_cache = {}
         self._launch_history = {}
+        self._pending = {}
+        self._evaluated = set()
         self._accept_all_parents = os.environ.get("ANTIMISOPEN_ANY_PARENT") == "1"
         self._current_user = ""
         try:
@@ -103,6 +124,12 @@ class MonitorEngine(QObject):
             self._window_seconds = float(snapshot.get("window_seconds") or 5.0)
             self._max_instances = int(snapshot.get("max_instances") or 1)
             self._action = snapshot.get("action") or "kill_notify"
+            mode = str(snapshot.get("trigger_mode") or "smart")
+            if mode not in ("smart", "shell", "any"):
+                mode = "smart"
+            if mode != self._trigger_mode:
+                self._pending.clear()
+            self._trigger_mode = mode
             self._always_enforce = bool(snapshot.get("always_enforce_max"))
             self._focus_existing = bool(snapshot.get("focus_existing", True))
             self._notify = bool(snapshot.get("notify", True))
@@ -149,10 +176,13 @@ class MonitorEngine(QObject):
                 self._consider(pid, current)
             except Exception as exc:
                 self.log.emit("处理新进程异常：%r" % (exc,))
+        self._retry_pending(current)
 
         self._known = current
         if len(self._exe_cache) > 400:
             self._exe_cache = {pid: path for pid, path in self._exe_cache.items() if pid in current}
+        if len(self._evaluated) > 2000:
+            self._evaluated = {pid for pid in self._evaluated if pid in current}
 
     # ------------------------------------------------------------ 判定
     def _consider(self, pid: int, current: dict) -> None:
@@ -167,11 +197,128 @@ class MonitorEngine(QObject):
             return
 
         parent_name = current.get(ppid, ("", 0, 0.0))[0]
-        if not self._accept_all_parents and parent_name not in LAUNCH_PARENTS:
-            return
         if parent_name == name:
             return
 
+        with self._lock:
+            mode = self._trigger_mode
+        needs_window = False
+        if self._accept_all_parents:
+            allowed = True
+        elif mode == "shell":
+            # 兼容旧版：只认资源管理器 / 开始菜单等系统外壳
+            allowed = parent_name in LAUNCH_PARENTS
+        else:
+            allowed, needs_window = self._is_user_launch(
+                pid, name, ppid, parent_name, current)
+        if not allowed:
+            return
+        if needs_window and not self._has_launch_window(pid, current):
+            # 进程刚出现，窗口可能还没建好；先挂起，随后几秒内继续观察
+            self._pending.setdefault(pid, time.time())
+            return
+        self._pending.pop(pid, None)
+        self._evaluate(pid, current)
+
+    def _is_user_launch(self, pid, name, ppid, parent_name, current):
+        """判断新进程是否是用户主动启动的。
+
+        Windows 上打开快捷方式的父进程不一定是 explorer.exe：桌面整理、电脑
+        管家、第三方启动器都可能成为父进程。智能模式改为排除“程序自己派生
+        的子进程”，其余外部启动一律算用户启动。
+        """
+        if parent_name in LAUNCH_PARENTS:
+            return True, False
+        with self._lock:
+            mode = self._trigger_mode
+        if mode == "any":
+            return True, False
+        if not parent_name:
+            return True, True
+        if self._is_internal_process(pid, name, ppid, current):
+            return False, False
+        if self._looks_like_helper(pid, name):
+            return False, False
+        return True, True
+
+    def _is_internal_process(self, pid, name, ppid, current, depth=3):
+        """父进程链中出现同名程序或同一安装目录，说明是程序自己的子进程。"""
+        exe = self._exe_of(pid)
+        my_dir = os.path.dirname(exe) if exe else ""
+        cursor = ppid
+        for _ in range(depth):
+            node = current.get(cursor)
+            if not node:
+                break
+            p_name, p_ppid, _t = node
+            if p_name == name:
+                return True
+            if my_dir:
+                p_exe = self._exe_of(cursor)
+                if p_exe:
+                    p_dir = os.path.dirname(p_exe)
+                    if p_dir and (p_dir == my_dir or p_dir.startswith(my_dir + "\\")
+                                  or my_dir.startswith(p_dir + "\\")):
+                        return True
+            cursor = p_ppid
+        return False
+
+    def _looks_like_helper(self, pid, name):
+        if any(hint in name for hint in HELPER_HINTS):
+            return True
+        try:
+            cmdline = " ".join(psutil.Process(pid).cmdline()).lower()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            return False
+        return any(flag in cmdline for flag in HELPER_FLAGS)
+
+    def _has_launch_window(self, pid, current):
+        try:
+            if winutil.has_visible_window(pid, require_title=False):
+                return True
+        except Exception:
+            pass
+        cursor = current.get(pid, ("", 0, 0.0))[1]
+        for _ in range(3):
+            node = current.get(cursor)
+            if not node:
+                break
+            p_name, p_ppid, _t = node
+            try:
+                if p_name and winutil.has_visible_window(cursor, require_title=False):
+                    return True
+            except Exception:
+                pass
+            cursor = p_ppid
+        return False
+
+    def _retry_pending(self, current):
+        if not self._pending:
+            return
+        now = time.time()
+        for pid, first in list(self._pending.items()):
+            if pid not in current:
+                self._pending.pop(pid, None)
+                continue
+            waited = now - first
+            if waited > LAUNCH_WINDOW_WAIT:
+                # 有些程序（游戏、启动器、自绘界面）很晚才建窗口，甚至没有标题。
+                # 已经排除“程序自己的子进程”和辅助进程，等太久就按真实启动处理。
+                self._pending.pop(pid, None)
+                try:
+                    self._evaluate(pid, current)
+                except Exception as exc:
+                    self.log.emit("延迟判定异常：%r" % (exc,))
+                continue
+            try:
+                self._consider(pid, current)
+            except Exception as exc:
+                self.log.emit("待定进程异常：%r" % (exc,))
+
+    def _evaluate(self, pid: int, current: dict) -> None:
+        if pid in self._evaluated:
+            return
+        name, ppid, _create = current.get(pid, ("", 0, 0.0))
         exe = self._exe_of(pid)
         lowered = exe.replace("/", "\\")
         if lowered:
@@ -179,6 +326,7 @@ class MonitorEngine(QObject):
                 return
             if os.path.basename(lowered) == SELF_NAME:
                 return
+        self._evaluated.add(pid)
 
         info = AppInfo(pid, name, exe, ppid, _create)
         with self._lock:

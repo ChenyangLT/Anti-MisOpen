@@ -449,6 +449,18 @@ class PauseDialog(BaseDialog):
         return True
 
 
+class InfoDialog(BaseDialog):
+    """展示多行结果（通知修复报告等）。"""
+
+    def __init__(self, parent=None, title: str = "提示", subtitle: str = "",
+                 lines=None, width: int = 480):
+        super().__init__(parent, title, subtitle, width=width,
+                         ok_text="知道了", cancel_text="关闭")
+        self._cancel_button.setVisible(False)
+        for text in (lines or []):
+            self.body.addWidget(make_label(str(text), "body", wrap=True))
+
+
 def confirm(parent, title: str, message: str, ok_text: str = "确定",
             danger: bool = False) -> bool:
     dialog = ConfirmDialog(parent, title, message, ok_text, danger)

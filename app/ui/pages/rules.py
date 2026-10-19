@@ -38,6 +38,16 @@ class RulesPage(PageBase):
             "启用防护", "关闭后不再拦截任何重复启动", self._enabled_switch))
         layout.addWidget(self.divider())
 
+        self._trigger_mode = SegmentedControl(
+            [("smart", "智能识别"), ("shell", "仅桌面"), ("any", "全部进程")], "smart")
+        self._trigger_mode.changed.connect(self._on_trigger_mode)
+        layout.addWidget(self.setting_row(
+            "启动识别方式",
+            "智能识别：桌面整理、电脑管家等第三方启动器也算；仅桌面：只认资源管理器；"
+            "全部进程：仅排查问题用，容易误伤",
+            self._trigger_mode))
+        layout.addWidget(self.divider())
+
         self._window_stepper = Stepper(5.0, 1.0, 60.0, 1.0, 0, " 秒")
         self._window_stepper.valueChanged.connect(self._on_window)
         layout.addWidget(self.setting_row(
@@ -110,6 +120,11 @@ class RulesPage(PageBase):
             action = "kill_notify"
         self._action.setValue(action)
 
+        mode = str(store.get("trigger_mode") or "smart")
+        if mode not in ("smart", "shell", "any"):
+            mode = "smart"
+        self._trigger_mode.setValue(mode)
+
         for switch, key in ((self._always_switch, "always_enforce_max"),
                             (self._focus_switch, "focus_existing"),
                             (self._notify_switch, "notify")):
@@ -178,6 +193,18 @@ class RulesPage(PageBase):
                 return
         self.persist({"enabled": checked})
         self.refresh()
+
+    def _on_trigger_mode(self, value: str) -> None:
+        mode = str(value)
+        if mode not in ("smart", "shell", "any"):
+            return
+        self.persist({"trigger_mode": mode})
+        notes = {
+            "smart": "已启用智能识别：快捷方式、桌面整理、电脑管家启动都会拦截",
+            "shell": "已切换为仅桌面：只识别资源管理器和开始菜单的启动",
+            "any": "已切换为全部进程：所有新进程都会判定，仅建议排查问题时使用",
+        }
+        self.toast(notes[mode], "success" if mode == "smart" else "warning")
 
     def _on_window(self, value: float) -> None:
         self.persist({"window_seconds": float(value)})

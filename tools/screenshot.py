@@ -56,6 +56,11 @@ def seed(store: config.ConfigStore) -> None:
         "memory_last_cleanup": now - 600,
         "memory_last_freed": int(1.8 * 1024 ** 3),
         "memory_total_freed": int(12.4 * 1024 ** 3),
+        "junk_selected": ["recycle", "temp"],
+        "junk_use_recycle": True,
+        "junk_last_cleanup": now - 86400,
+        "junk_last_freed": int(1.3 * 1024 ** 3),
+        "junk_total_freed": int(8.2 * 1024 ** 3),
         "stats": {
             "total_blocked": 128,
             "today": config.today_key(),
@@ -114,10 +119,21 @@ def main() -> int:
     for _ in range(8):
         application.processEvents()
 
-    names = ["dashboard", "cleaner", "rules", "exceptions", "settings", "about"]
+    names = ["dashboard", "cleaner", "junk", "rules", "exceptions", "settings", "about"]
     for index, name in enumerate(names):
         window.open_page(index)
         for _ in range(6):
+            application.processEvents()
+        if name == "junk":
+            # 垃圾扫描在后台线程里跑，等它统计完再截图
+            page = window._pages[index]
+            deadline = time.time() + 40
+            while time.time() < deadline:
+                application.processEvents()
+                thread = getattr(page, "_thread", None)
+                if thread is None and getattr(page, "_last_scan", 0) > 0:
+                    break
+                time.sleep(0.1)
             application.processEvents()
         if name == "about":
             # 硬件信息在后台线程读取，等它完成再截图

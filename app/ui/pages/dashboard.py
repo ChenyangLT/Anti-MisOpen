@@ -202,7 +202,7 @@ class DashboardPage(PageBase):
         text = make_label("建议开启开机自启动，让防护在每次开机后自动生效（默认关闭）", "muted", wrap=True)
         layout.addWidget(text, 1)
         button = make_button("去开启", "ghost")
-        button.clicked.connect(lambda: self.win.open_page(4))
+        button.clicked.connect(lambda: self.win.open_page(5))
         layout.addWidget(button)
         self.body.addWidget(self._tip)
 
@@ -249,7 +249,7 @@ class DashboardPage(PageBase):
             tips_layout.addLayout(item)
         tips_layout.addStretch(1)
         settings_button = make_button("打开设置", "ghost")
-        settings_button.clicked.connect(lambda: self.win.open_page(4))
+        settings_button.clicked.connect(lambda: self.win.open_page(5))
         tips_layout.addWidget(settings_button, 0, Qt.AlignRight)
         row.addWidget(tips_card, 2)
 

@@ -27,11 +27,12 @@ from .pages.about import AboutPage
 from .pages.cleaner import CleanerPage
 from .pages.dashboard import DashboardPage, human_duration
 from .pages.exceptions import ExceptionsPage
+from .pages.junk import JunkPage
 from .pages.rules import RulesPage
 from .pages.settings import SettingsPage
 from .widgets import IconView, NavButton, Toast, WindowButton, make_badge, make_label
 
-PAGES = ("概览", "清理", "规则", "例外", "设置", "关于")
+PAGES = ("概览", "清理", "垃圾清理", "规则", "例外", "设置", "关于")
 
 
 class LogoMark(QWidget):
@@ -201,8 +202,9 @@ class MainWindow(QWidget):
         section.setContentsMargins(10, 0, 0, 4)
         side.addWidget(section)
 
-        nav_items = (("grid", "概览"), ("refresh", "清理"), ("sliders", "规则"),
-                     ("check", "例外"), ("gear", "设置"), ("info", "关于"))
+        nav_items = (("grid", "概览"), ("refresh", "清理"), ("trash", "垃圾清理"),
+                     ("sliders", "规则"), ("check", "例外"), ("gear", "设置"),
+                     ("info", "关于"))
         for index, (icon_name, text) in enumerate(nav_items):
             button = NavButton(icon_name, text)
             button.clicked.connect(lambda _checked=False, i=index: self.open_page(i))
@@ -253,8 +255,9 @@ class MainWindow(QWidget):
 
         self._stack = QStackedWidget()
         self._stack.setObjectName("PageStack")
-        self._pages = [DashboardPage(self), CleanerPage(self), RulesPage(self),
-                       ExceptionsPage(self), SettingsPage(self), AboutPage(self)]
+        self._pages = [DashboardPage(self), CleanerPage(self), JunkPage(self),
+                       RulesPage(self), ExceptionsPage(self), SettingsPage(self),
+                       AboutPage(self)]
         for page in self._pages:
             self._stack.addWidget(page)
         content_layout.addWidget(self._stack, 1)
@@ -484,6 +487,16 @@ class MainWindow(QWidget):
     def show_toast(self, text: str, tone: str = "success") -> None:
         self._toast.show_message(text, tone)
         self._toast.raise_()
+
+    def test_notification(self) -> None:
+        """从设置页触发的一条通知测试，同时走托盘气泡和窗口内 Toast。"""
+        if self._tray.isVisible():
+            self._tray.showMessage(
+                "Anti MisOpen 通知测试",
+                "能看到这条系统通知，说明通知已经正常工作。",
+                QSystemTrayIcon.Information, 5000)
+        self.show_toast("通知测试已发送：如果只看到这条提示而没看到系统通知，点“一键修复通知设置”",
+                        "info")
 
     def open_page(self, index: int) -> None:
         index = max(0, min(len(self._pages) - 1, int(index)))

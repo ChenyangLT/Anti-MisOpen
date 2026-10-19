@@ -2,12 +2,15 @@
 """设置页：启动方式、外观、安全、数据维护。"""
 from __future__ import annotations
 
+import subprocess
+import time
+
 from PySide2.QtCore import Qt, QUrl
 from PySide2.QtGui import QDesktopServices
-from PySide2.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide2.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 
-from ...core import autostart, config, themes
-from ..dialogs import ConfirmDialog, PasswordDialog
+from ...core import autostart, config, notifyfix, themes, winutil
+from ..dialogs import ConfirmDialog, InfoDialog, PasswordDialog
 from ..widgets import (EmptyState, Stepper, ThemeCard, ToggleSwitch,
                        make_badge, make_label)
 from .base import PageBase, make_button
@@ -25,6 +28,7 @@ class SettingsPage(PageBase):
     def _build(self) -> None:
         self.page_header("设置", "启动方式、界面外观、密码保护和数据维护")
         self._build_startup()
+        self._build_notifications()
         self._build_theme()
         self._build_security()
         self._build_data()
@@ -52,6 +56,37 @@ class SettingsPage(PageBase):
         row.addWidget(make_label("守护引擎以约 0.2 秒的间隔检查新启动的程序，占用很低。", "muted"))
         row.addStretch(1)
         layout.addLayout(row)
+        self.body.addWidget(card)
+
+    def _build_notifications(self) -> None:
+        card, layout = self.card("通知与提示", "拦截提示弹不出来时，可以用这里的“一键修复”恢复系统通知设置")
+        self._notify_badge = make_badge("检测中…", "muted")
+        self._notify_status = make_label("", "muted", wrap=True)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        head.addWidget(self._notify_badge, 0, Qt.AlignVCenter)
+        head.addWidget(self._notify_status, 1)
+        layout.addLayout(head)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        repair = make_button("一键修复通知设置", "primary")
+        repair.clicked.connect(self._on_repair_notify)
+        buttons.addWidget(repair)
+        recheck = make_button("重新检测", "ghost")
+        recheck.clicked.connect(lambda: self._refresh_notify_status(force=True, toast=True))
+        buttons.addWidget(recheck)
+        test = make_button("测试通知", "ghost")
+        test.clicked.connect(self.win.test_notification)
+        buttons.addWidget(test)
+        open_settings = make_button("打开系统通知设置", "ghost")
+        open_settings.clicked.connect(self._open_notification_settings)
+        buttons.addWidget(open_settings)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+
+        self._notify_note = make_label("", "faint", wrap=True)
+        layout.addWidget(self._notify_note)
         self.body.addWidget(card)
 
     def _build_theme(self) -> None:
@@ -142,6 +177,70 @@ class SettingsPage(PageBase):
         themes.repolish(self._password_badge)
         self._password_clear.setVisible(has_password)
         self._password_button.setText("修改密码" if has_password else "设置密码")
+
+        self._refresh_notify_status()
+
+    # ------------------------------------------------------------- 通知
+    def _refresh_notify_status(self, force: bool = False, toast: bool = False) -> None:
+        now = time.time()
+        if not force and now - getattr(self, "_notify_checked", 0) < 30:
+            return
+        self._notify_checked = now
+        try:
+            diagnosis = notifyfix.diagnose()
+        except Exception as exc:  # noqa: BLE001
+            self._notify_badge.setText("无法检测")
+            self._notify_badge.setProperty("tone", "muted")
+            themes.repolish(self._notify_badge)
+            self._notify_status.setText("读取通知设置失败：%s" % exc)
+            return
+        ok = bool(diagnosis.get("ok"))
+        self._notify_badge.setText("正常" if ok else "需要修复")
+        self._notify_badge.setProperty("tone", "success" if ok else "warning")
+        themes.repolish(self._notify_badge)
+        self._notify_status.setText(notifyfix.summary(diagnosis))
+        self._notify_note.setText(diagnosis.get("note") or "")
+        if not ok:
+            broken = [item["title"] for item in diagnosis.get("checks", [])
+                      if item["required"] and not item["ok"]]
+            self._notify_note.setText("需要处理：%s%s" % (
+                "、".join(broken),
+                "（部分项目需要管理员权限）" if not diagnosis.get("admin") else ""))
+        if toast:
+            self.toast("通知设置正常" if ok else "通知设置需要修复", "success" if ok else "warning")
+
+    def _on_repair_notify(self) -> None:
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            result = notifyfix.repair()
+        except Exception as exc:  # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            self.toast("修复失败：%s" % exc, "danger")
+            return
+        QApplication.restoreOverrideCursor()
+        lines = []
+        lines.append("修复完成，通知设置已恢复正常。" if result.get("ok")
+                     else "已尽量修复，但下面这些项目没能改成功：")
+        for step in result.get("steps", []):
+            prefix = "✓ " if step.get("ok") else "✗ "
+            detail = ("（%s）" % step["detail"]) if step.get("detail") else ""
+            lines.append(prefix + step.get("title", "") + detail)
+        lines.append("")
+        lines.append("可以点“测试通知”确认效果；如果系统开了“专注助手 / 请勿打扰”，需要先关掉。")
+        InfoDialog(self.win, "通知设置修复结果", "下面的修改已写入当前用户的通知设置",
+                   lines, width=520).exec_()
+        self._refresh_notify_status(force=True)
+        self.win.test_notification()
+
+    def _open_notification_settings(self) -> None:
+        if winutil.is_win7():
+            try:
+                subprocess.Popen(["control.exe", "/name", "Microsoft.NotificationAreaIcons"],
+                                 creationflags=0x08000000)
+                return
+            except Exception:
+                pass
+        QDesktopServices.openUrl(QUrl("ms-settings:notifications"))
 
     # ------------------------------------------------------------- 交互
     def _on_autostart(self, checked: bool) -> None:
